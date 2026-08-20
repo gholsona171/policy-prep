@@ -1,0 +1,16 @@
+{
+  "name": "Policy Prep",
+  "short_name": "Policy Prep",
+  "description": "Promotion exam study: one policy at a time, 90 percent and no repeat misses to move on.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#11141a",
+  "theme_color": "#11141a",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#11141a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Policy Prep">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>Policy Prep</title>
+<style>
+  :root{
+    --bg:#11141a; --panel:#181c24; --line:#2b323e; --ink:#e8ecf3; --dim:#98a2b3;
+    --accent:#4da3ff; --ok:#3ecf8e; --bad:#ff6b6b; --warn:#f0b429;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;
+    -webkit-text-size-adjust:100%}
+  .wrap{max-width:640px;margin:0 auto;
+    padding:calc(18px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--dim);font-size:13px;margin:0 0 18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+  button{font:inherit;border:0;border-radius:11px;padding:14px 18px;background:var(--accent);
+    color:#06101d;font-weight:600;width:100%;cursor:pointer}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:500}
+  button:disabled{opacity:.45}
+  .stack > * + *{margin-top:9px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pill{font-size:12px;padding:3px 9px;border-radius:20px;border:1px solid var(--line);color:var(--dim)}
+  .pill.ok{color:var(--ok);border-color:#20503c}
+  .pill.warn{color:var(--warn);border-color:#4d3d12}
+  .bar{height:6px;background:#222833;border-radius:6px;overflow:hidden;margin:10px 0 0}
+  .bar > i{display:block;height:100%;background:var(--accent);transition:width .2s}
+  .choice{display:block;text-align:left;background:#141821;border:1px solid var(--line);
+    color:var(--ink);border-radius:12px;padding:14px;margin:8px 0;font-weight:400;
+    width:100%;font-size:15.5px;line-height:1.45}
+  .choice.right{border-color:var(--ok);background:#132a20}
+  .choice.wrong{border-color:var(--bad);background:#2a1616}
+  .stem{font-size:17px;margin:2px 0 14px;white-space:pre-wrap}
+  .feedback{border-left:3px solid var(--line);padding:8px 0 8px 12px;margin-top:12px;
+    font-size:14px;color:var(--dim)}
+  .feedback b{color:var(--ink)}
+  .cite{font-style:italic;margin-top:6px;color:#7e8899}
+  .meta{color:var(--dim);font-size:13px}
+  .big{font-size:40px;font-weight:700;letter-spacing:-1px;line-height:1.1}
+  .hide{display:none}
+  ul{margin:8px 0 0;padding-left:18px;color:var(--dim);font-size:14px}
+  textarea{width:100%;min-height:130px;background:#141821;color:var(--ink);
+    border:1px solid var(--line);border-radius:11px;padding:11px;font:13px/1.4 monospace}
+  input[type=file]{color:var(--dim);font-size:13px;width:100%}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="home">
+    <h1>Policy Prep</h1>
+    <p class="sub" id="homesub">One policy at a time.</p>
+    <div id="policies"></div>
+    <div class="card stack">
+      <button id="start">Start a session</button>
+      <button id="toimport" class="ghost">Load or update a policy</button>
+    </div>
+  </div>
+
+  <div id="quiz" class="hide">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="meta" id="counter"></span><span class="meta" id="running"></span>
+      </div>
+      <div class="bar"><i id="prog" style="width:0"></i></div>
+    </div>
+    <div class="card">
+      <div class="stem" id="stem"></div>
+      <div id="choices"></div>
+      <div class="feedback hide" id="feedback"></div>
+    </div>
+    <div class="card stack">
+      <button id="next" class="hide">Next</button>
+      <button id="quit" class="ghost">End session</button>
+    </div>
+  </div>
+
+  <div id="result" class="hide">
+    <div class="card">
+      <div class="big" id="score"></div>
+      <div class="meta" id="scoreline"></div>
+      <div id="gatebox" style="margin-top:14px"></div>
+    </div>
+    <div class="card stack">
+      <button id="again">Another session</button>
+      <button id="home2" class="ghost">Back</button>
+    </div>
+  </div>
+
+  <div id="import" class="hide">
+    <h1>Load a policy</h1>
+    <p class="sub">Your policy content stays on this phone. Nothing is uploaded.</p>
+    <div class="card stack">
+      <div class="meta">Pick the pack file Nomad sent you</div>
+      <input type="file" id="file" accept=".json,application/json">
+    </div>
+    <div class="card stack">
+      <div class="meta">Or paste the pack here</div>
+      <textarea id="paste" placeholder='{"policy":{...},"items":{...},"bank":{...}}'></textarea>
+      <button id="loadpaste">Load pasted pack</button>
+    </div>
+    <div class="card stack">
+      <div class="meta" id="importmsg"></div>
+      <button id="backhome" class="ghost">Back</button>
+      <button id="wipe" class="ghost">Erase everything on this phone</button>
+    </div>
+  </div>
+
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
