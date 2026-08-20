@@ -47,9 +47,16 @@ function rank(questions, progress, seed) {
     .map((r) => r.q);
 }
 
-export function buildSession(store, seed = Date.now(), size = SESSION_SIZE) {
+/**
+ * @param focusId  optional: drill a specific policy instead of the one in sequence.
+ *                 Used by the "drill this" button so a passed policy can be revisited
+ *                 without resetting anything.
+ */
+export function buildSession(store, seed = Date.now(), size = SESSION_SIZE, focusId = null) {
   const policies = store.index.policies;
-  const current = policies.find((p) => !p.passed) ?? policies[policies.length - 1];
+  const current = (focusId && policies.find((p) => p.id === focusId))
+    ?? policies.find((p) => !p.passed)
+    ?? policies[policies.length - 1];
   if (!current) return { questions: [], currentId: null, currentCount: 0 };
 
   const passedIds = policies.filter((p) => p.passed && p.id !== current.id).map((p) => p.id);
@@ -81,11 +88,24 @@ export function leeches(items, progress) {
     .map((r) => ({ id: r.item.id, label: r.item.label, wrong: r.s.wrong }));
 }
 
+/**
+ * How many questions from a policy a session must contain before its score counts.
+ *
+ * A flat 30 would make any policy with a smaller bank impossible to pass, which is a
+ * real case: some real policies are two pages. So the requirement scales down to 80% of
+ * whatever bank exists, and 30 is only the ceiling.
+ */
+export function requiredForGate(bank) {
+  const size = bank?.questions?.length ?? 0;
+  return Math.min(MIN_CURRENT_IN_GATE, Math.max(1, Math.ceil(size * 0.8)));
+}
+
 /** Two conditions on purpose: a percentage alone can be cleared while still carrying a
     handful of facts you reliably get wrong, and those are what cost exam points. */
-export function gate(policyId, items, progress) {
+export function gate(policyId, items, progress, bank) {
+  const need = requiredForGate(bank);
   const best = progress.sessions
-    .filter((s) => s.currentId === policyId && s.currentCount >= MIN_CURRENT_IN_GATE)
+    .filter((s) => s.currentId === policyId && s.currentCount >= need)
     .reduce((b, s) => (!b || s.pct > b.pct ? s : b), null);
 
   const outstanding = leeches(items, progress);
@@ -95,11 +115,37 @@ export function gate(policyId, items, progress) {
     passed: scoreOk && outstanding.length === 0,
     bestPct: best ? best.pct : null,
     scoreOk,
+    need,
     leeches: outstanding,
     reason: !best
-      ? `No qualifying session yet (needs ${MIN_CURRENT_IN_GATE}+ questions from this policy).`
+      ? `No qualifying session yet (needs ${need}+ questions from this policy).`
       : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${PASS_PCT}%.`
       : outstanding.length ? `${outstanding.length} item(s) still wrong after ${LEECH_THRESHOLD}+ misses.`
       : 'Passed.',
+  };
+}
+
+/** Everything the home screen and the stats screen want to show about one policy. */
+export function policyStats(policyId, items, bank, progress) {
+  const answers = progress.answers.filter((a) => a.policyId === policyId);
+  const sessions = progress.sessions.filter((s) => s.currentId === policyId);
+  const right = answers.filter((a) => a.correct).length;
+  const list = items?.items ?? [];
+
+  const seen = new Set(answers.map((a) => a.itemId));
+  const mastered = list.filter((i) => {
+    const s = itemStats(progress, i.id);
+    return s.seen > 0 && s.resolved;
+  }).length;
+
+  return {
+    answered: answers.length,
+    right,
+    accuracy: answers.length ? Math.round((right / answers.length) * 100) : null,
+    sessions: sessions.length,
+    lastPct: sessions.length ? sessions[sessions.length - 1].pct : null,
+    itemsTotal: list.length,
+    itemsSeen: list.filter((i) => seen.has(i.id)).length,
+    itemsMastered: mastered,
   };
 }
