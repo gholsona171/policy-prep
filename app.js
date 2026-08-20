@@ -295,4 +295,29 @@ $('home2').onclick = () => { renderHome(); go('home'); };
 if (signedIn()) { renderHome(); go('home'); sync(true); } else { go('auth'); }
 window.addEventListener('online', () => sync(true));
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+/* Updates.
+   An iPhone home-screen app resumes rather than reloads, so a fixed version can sit on
+   the server for days while the phone keeps running the old one. This forces the issue:
+   check for a new worker on every launch and on return to the foreground, and reload
+   once the new one takes control. The guard stops a reload loop. */
+export const APP_VERSION = 'v6';
+
+if ('serviceWorker' in navigator) {
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch(() => {});
+}
+
+// Shown on the home screen so there is never an argument about which build is running.
+const vtag = document.getElementById('version');
+if (vtag) vtag.textContent = `build ${APP_VERSION}`;
