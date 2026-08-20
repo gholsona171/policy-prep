@@ -48,13 +48,17 @@ function rank(questions, progress, seed) {
 }
 
 /**
- * @param focusId  optional: drill a specific policy instead of the one in sequence.
- *                 Used by the "drill this" button so a passed policy can be revisited
- *                 without resetting anything.
+ * @param focusId  optional: revisit a policy you have ALREADY PASSED.
+ *
+ * Deliberately refuses to focus a policy that has not been passed. The sequence is the
+ * point of the system: you work one policy until it is cleared, and you cannot skip
+ * ahead to a later one because it looks easier or more interesting. Revision of
+ * finished material is allowed; jumping the queue is not.
  */
 export function buildSession(store, seed = Date.now(), size = SESSION_SIZE, focusId = null) {
   const policies = store.index.policies;
-  const current = (focusId && policies.find((p) => p.id === focusId))
+  const requested = focusId ? policies.find((p) => p.id === focusId) : null;
+  const current = (requested && requested.passed ? requested : null)
     ?? policies.find((p) => !p.passed)
     ?? policies[policies.length - 1];
   if (!current) return { questions: [], currentId: null, currentCount: 0 };

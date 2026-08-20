@@ -87,11 +87,19 @@ function renderHome() {
       <div><div class="num">${store.progress.sessions.length}</div><div class="mini">sessions</div></div>
     </div></div>` : '';
 
+  // The policy in focus is simply the first one not yet passed. Everything after it is
+  // locked, and the card says so rather than silently offering no way in.
+  const focusId = list.find((p) => !p.passed)?.id ?? null;
+
   $('policies').innerHTML = list.length ? list.map((p) => {
     const bank = store.banks[p.id];
     const c = coverage(store.items[p.id], bank);
     const g = gate(p.id, store.items[p.id], store.progress, bank);
     const st = policyStats(p.id, store.items[p.id], bank, store.progress);
+    const state = p.passed ? 'passed' : p.id === focusId ? 'in focus' : 'locked';
+    const status = p.passed ? 'Cleared. Still appears in review.'
+      : p.id === focusId ? g.reason
+      : 'Locked until the policy above is passed.';
     const leech = g.leeches.length
       ? `<div class="keylist">${g.leeches.slice(0, 4).map((l) =>
           `<div><span>${esc(l.label)}</span><span class="bad">missed ${l.wrong}x</span></div>`).join('')}
@@ -99,20 +107,21 @@ function renderHome() {
         </div>` : '';
     return `<div class="card">
       <div class="row" style="justify-content:space-between">
-        <b>${esc(p.title)}</b>
-        <span class="pill ${p.passed ? 'ok' : 'warn'}">${p.passed ? 'passed' : 'in focus'}</span>
+        <b${state === 'locked' ? ' style="color:#6b7480"' : ''}>${esc(p.title)}</b>
+        <span class="pill ${state === 'passed' ? 'ok' : state === 'in focus' ? 'warn' : ''}">${state}</span>
       </div>
-      ${masteryBar(st)}
+      ${state === 'locked' ? '' : masteryBar(st)}
       <div class="row" style="margin-top:10px">
         <span class="pill ${c.complete ? 'ok' : 'warn'}">coverage ${c.covered}/${c.total}</span>
         <span class="pill">${bank?.questions?.length ?? 0} questions</span>
+        ${state === 'locked' ? '' : `
         <span class="pill">${g.bestPct === null ? 'no score yet' : 'best ' + g.bestPct + '%'}</span>
-        <span class="pill">${st.accuracy === null ? 'unstudied' : st.accuracy + '% overall'}</span>
+        <span class="pill">${st.accuracy === null ? 'unstudied' : st.accuracy + '% overall'}</span>`}
       </div>
-      <div class="meta" style="margin-top:9px">${esc(g.reason)}</div>${leech}
-      <div class="row" style="margin-top:12px">
-        <button class="small ghost" data-drill="${esc(p.id)}">Drill this one</button>
-      </div>
+      <div class="meta" style="margin-top:9px">${esc(status)}</div>${leech}
+      ${p.passed ? `<div class="row" style="margin-top:12px">
+        <button class="small ghost" data-drill="${esc(p.id)}">Revise this one</button>
+      </div>` : ''}
     </div>`;
   }).join('') : `<div class="card"><b>Nothing to study yet.</b>
       <div class="meta" style="margin-top:6px">New policies appear here on their own.</div></div>`;
