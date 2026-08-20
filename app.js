@@ -159,7 +159,9 @@ function finish() {
 /* ------------------------------------------------------------------ auth */
 
 async function doAuth(fn, label) {
-  const email = $('email').value.trim();
+  // Lowercased because Supabase stores emails lowercase, and a phone keyboard that
+  // capitalises the first letter would otherwise produce a baffling "wrong credentials".
+  const email = $('email').value.trim().toLowerCase();
   const password = $('password').value;
   if (!email || !password) return ($('authmsg').textContent = 'Email and password, please.');
   $('authmsg').textContent = `${label}...`;

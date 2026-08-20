@@ -62,8 +62,13 @@
     <h1>Policy Prep</h1>
     <p class="sub">Sign in once. After that it stays signed in and pulls new policies by itself.</p>
     <div class="card stack">
-      <input type="email" id="email" placeholder="Email" autocomplete="username" inputmode="email">
-      <input type="password" id="password" placeholder="Password" autocomplete="current-password">
+      <!-- autocapitalize/autocorrect off: iOS will happily capitalise the first letter
+           of an email or "helpfully" correct a password, and the resulting failure looks
+           like bad credentials rather than a keyboard doing it. -->
+      <input type="email" id="email" placeholder="Email" autocomplete="username"
+             inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false">
+      <input type="password" id="password" placeholder="Password"
+             autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false">
       <button id="signin">Sign in</button>
       <button id="signup" class="ghost">Create an account</button>
       <div class="meta" id="authmsg"></div>
