@@ -107,6 +107,12 @@
   <div id="home" class="hide">
     <h1>Policy Prep</h1>
     <p class="sub" id="homesub">One policy at a time.</p>
+    <div id="resume" class="card stack hide">
+      <b>You have a session in progress</b>
+      <div class="meta" id="resumeline"></div>
+      <button id="resumebtn">Pick up where you left off</button>
+      <button id="dropbtn" class="ghost">Throw it away and start fresh</button>
+    </div>
     <div id="overall"></div>
     <div id="policies"></div>
     <div class="card stack">
@@ -193,7 +199,10 @@
     </div>
     <div class="card stack">
       <button id="next" class="hide">Next</button>
-      <button id="quit" class="ghost">End session</button>
+      <div class="twoup">
+        <button id="pause" class="ghost">Pause, finish later</button>
+        <button id="quit" class="ghost">End and score it</button>
+      </div>
     </div>
   </div>
 

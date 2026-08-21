@@ -18,6 +18,7 @@ const go = (name) => { screens.forEach(hide); show(name); window.scrollTo(0, 0);
 const blank = () => ({
   index: { policies: [] }, items: {}, banks: {},
   progress: { answers: [], sessions: [] },
+  open: null,   // a session started and not yet finished
 });
 
 let store = load();
@@ -69,6 +70,18 @@ function masteryBar(st) {
 
 function renderHome() {
   const list = store.index.policies;
+
+  // An unfinished session is the first thing on the screen, because it is the
+  // thing most likely to be why the app was opened.
+  const open = store.open;
+  $('resume').classList.toggle('hide', !open);
+  if (open) {
+    const title = list.find((p) => p.id === open.currentId)?.title ?? 'a policy';
+    const when = new Date(open.savedAt || Date.now());
+    $('resumeline').textContent =
+      `${open.answered} of ${open.questions.length} answered on ${title}, `
+      + `left off ${when.toLocaleDateString()} at ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+  }
   $('whoami').textContent = currentEmail() ? `Signed in as ${currentEmail()}` : '';
   $('homesub').textContent = list.length
     ? 'One policy at a time. 90 percent and no repeat misses to move on.'
@@ -227,6 +240,22 @@ function start(focusId = null) {
   const built = buildSession(store, Date.now(), SESSION_SIZE, focusId);
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
+  keepSession();
+  go('quiz');
+  renderQ();
+}
+
+/* An unfinished session survives backing out, closing the app, or the phone
+   deciding to kill it. Forty questions is a real sitting, and losing it because
+   a call came in is the kind of thing that makes someone stop using the app. */
+function keepSession() {
+  store.open = S ? { ...S, savedAt: Date.now() } : null;
+  save();
+}
+
+function resume() {
+  if (!store.open) return;
+  S = { ...store.open };
   go('quiz');
   renderQ();
 }
@@ -268,10 +297,12 @@ function pick(n) {
     + (q.cite ? `<div class="cite">"${esc(q.cite)}"</div>` : '');
   $('running').textContent = `${S.right} correct`;
   show('next');
+  keepSession();   // saved on every answer, not just at the end
 }
 
 function finish() {
   const pct = S.answered ? Math.round((S.right / S.answered) * 100) : 0;
+  store.open = null;   // it is finished; there is nothing left to resume
   store.progress.sessions.push({
     id: `s${Date.now()}-${Math.floor(performance.now())}`, at: Date.now(),
     currentId: S.currentId, currentCount: S.currentCount,
@@ -453,7 +484,11 @@ $('start').onclick = () => start();
 // passing, "another session" should move you on, not park you on finished material.
 $('again').onclick = () => start();
 $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : renderQ(); };
-$('quit').onclick = () => (S.answered ? finish() : go('home'));
+// Pause keeps the session on the shelf. End scores what was answered and closes it.
+$('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
+$('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
+$('resumebtn').onclick = () => resume();
+$('dropbtn').onclick = () => { store.open = null; save(); renderHome(); };
 $('home2').onclick = () => { renderHome(); go('home'); };
 
 /* Tells the recovery script in index.html that the modules loaded and ran. Set
@@ -470,7 +505,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v10';
+export const APP_VERSION = 'v11';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
