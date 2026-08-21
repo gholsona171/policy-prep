@@ -2,7 +2,7 @@ import {
   buildSession, coverage, gate, policyStats, itemStats, CONFIG, setConfig,
 } from './engine.js';
 import {
-  signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl, db, changePassword,
+  signIn, signUp, signOut, signedIn, currentEmail, rpc, policyPdfUrl, db, changePassword,
 } from './supa.js';
 import { syncAll } from './sync.js';
 
@@ -182,17 +182,17 @@ function openReading(id) {
   go('read');
 }
 
-/** The department's own document, laid out the way they laid it out. The link
-    is signed on the spot rather than stored, so it cannot be shared around
-    after the fact, and it needs a live connection: the text above works
-    offline, the PDF does not. */
+/** The department's own document, laid out the way they laid it out. Fetched
+    on demand and turned into a file locally, so nothing durable is handed out
+    and cancelling an account closes it immediately. Needs a live connection:
+    the text above works offline, the PDF does not. */
 async function openPdf() {
   if (!reading) return;
   const btn = $('readpdf');
   btn.disabled = true;
   $('pdfmsg').textContent = 'Fetching...';
   try {
-    const url = await signedFileUrl('policy-pdfs', `${reading}.pdf`);
+    const url = await policyPdfUrl(reading);
     $('pdfmsg').textContent = '';
     window.open(url, '_blank');
   } catch (e) {
@@ -342,12 +342,28 @@ function pick(n) {
 }
 
 function finish() {
-  const pct = S.answered ? Math.round((S.right / S.answered) * 100) : 0;
+  /* Score the policy being gated, on the questions actually answered.
+     Two faults lived here and both let a policy be cleared without earning it.
+     currentCount used to be the number of current-policy questions the session
+     PLANNED to ask, so ending after one correct answer recorded a 40 question,
+     100 percent session. And pct used to be the whole session including the
+     review drawn from policies already passed, so easy review questions could
+     lift a failing score on the current policy over the line. */
+  const answered = S.questions.slice(0, S.i + (S.answered > S.i ? 1 : 0));
+  const currentAnswered = answered.filter((q) => q.policyId === S.currentId);
+  const currentRight = currentAnswered.filter((q) => {
+    const a = store.progress.answers;
+    for (let n = a.length - 1; n >= 0; n--) if (a[n].questionId === q.id) return a[n].correct;
+    return false;
+  }).length;
+  const pct = currentAnswered.length
+    ? Math.round((currentRight / currentAnswered.length) * 100) : 0;
+
   store.open = null;   // it is finished; there is nothing left to resume
   store.progress.sessions.push({
     id: `s${Date.now()}-${Math.floor(performance.now())}`, at: Date.now(),
-    currentId: S.currentId, currentCount: S.currentCount,
-    asked: S.answered, right: S.right, pct, synced: false,
+    currentId: S.currentId, currentCount: currentAnswered.length,
+    asked: S.answered, right: currentRight, pct, synced: false,
   });
 
   const g = gate(S.currentId, store.items[S.currentId], store.progress, store.banks[S.currentId]);
@@ -357,8 +373,12 @@ function finish() {
   }
   save();
 
+  // The headline score is the one the gate uses, so the screen cannot say 93%
+  // while the rule is judging 89%.
   $('score').textContent = `${pct}%`;
-  $('scoreline').textContent = `${S.right} of ${S.answered} correct`;
+  $('scoreline').textContent = `${currentRight} of ${currentAnswered.length} on this policy`
+    + (S.answered > currentAnswered.length
+      ? `, plus ${S.answered - currentAnswered.length} review` : '');
   $('gatebox').innerHTML = g.passed
     ? '<span class="pill ok">policy passed, next one unlocked</span>'
     : `<span class="pill warn">not yet</span>
@@ -730,7 +750,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v16';
+export const APP_VERSION = 'v17';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
