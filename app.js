@@ -56,19 +56,23 @@ function load() {
    failing to write it is worth reporting, never worth aborting a render for. */
 let storageWarning = null;
 
+/* save() is progress, and it runs on every single answer, so it stays small and
+   synchronous. */
 const save = () => {
-  storageWarning = null;
   try {
     localStorage.setItem(KEY, JSON.stringify(lightOf(store)));
+    storageWarning = null;
   } catch (e) {
     storageWarning = `this phone refused to save your progress (${e.name || 'storage error'})`;
   }
-  // Fire and forget: a content write is a mirror of the server and the next sync
-  // rewrites it anyway, so nothing waits on the disk to finish.
-  writeContent(heavyOf(store)).catch((e) => {
-    storageWarning = `this phone refused to save the policy content (${e.name || e.message})`;
-  });
 };
+
+/* saveContent() is the eighty policies, and only a sync changes them. Keeping it out
+   of save() matters: the content is about 6.5 MB and rewriting that on every answer
+   would drain the battery to store bytes that did not change. */
+const saveContent = () => writeContent(heavyOf(store)).catch((e) => {
+  storageWarning = `this phone could not store the policy content (${e.name || e.message})`;
+});
 
 /** Boot-time read of the heavy half. Separate from load() because IndexedDB is async
     and the home screen should paint from what we already have rather than wait. */
@@ -87,6 +91,7 @@ async function sync(quiet) {
     await syncAll(store);
     applySettings();
     save();
+    await saveContent();
     renderHome();
     // Says what actually arrived, not just that something did. "Up to date" while
     // sixty five policies had no questions was a true sentence hiding a broken
