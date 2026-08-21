@@ -169,6 +169,7 @@
     <div class="card stack">
       <div class="meta" id="whoami"></div>
       <div class="mini" id="version"></div>
+      <button id="tosettings2" class="ghost">Settings</button>
       <button id="signout" class="ghost">Sign out</button>
     </div>
   </div>
@@ -177,7 +178,30 @@
        database enforces that regardless of what this screen shows. -->
   <div id="settings" class="hide">
     <h1>Settings</h1>
-    <p class="sub">These apply to everyone using the app, including your customers.</p>
+
+    <!-- Everybody gets these three. They change this account and this phone
+         only, so a customer can never affect anyone else's study. -->
+    <div class="card stack">
+      <div class="mini">Yours</div>
+      <button class="toggle ghost" id="prefSpeak" data-on="false">Read questions and answers aloud</button>
+      <button class="toggle ghost" id="prefUnlock" data-on="false">Let me study any section, in any order</button>
+      <div class="meta">Locked order is how the course is meant to be taken: one policy
+        until it is clear. Switch this on if you only want one particular area.</div>
+    </div>
+
+    <div class="card stack">
+      <div class="mini">Your password</div>
+      <input type="password" id="pwNew" placeholder="New password, at least 8 characters"
+             autocomplete="new-password" autocapitalize="none" spellcheck="false">
+      <input type="password" id="pwAgain" placeholder="Type it again"
+             autocomplete="new-password" autocapitalize="none" spellcheck="false">
+      <button id="pwSave" class="ghost">Change my password</button>
+      <div class="meta" id="pwMsg"></div>
+    </div>
+
+    <div id="masteronly">
+    <p class="sub">Everything below is yours alone as the master account, and applies to
+      everyone using the app.</p>
 
     <div class="card stack">
       <div class="mini">The session</div>
@@ -208,14 +232,20 @@
     <div class="card stack">
       <div class="meta" id="setmsg"></div>
       <button id="setsave">Save</button>
-      <button id="setback" class="ghost">Back</button>
+    </div>
     </div>
 
+    <!-- Outside the master block on purpose: your own history is your own,
+         whoever you are. -->
     <div class="card stack">
       <div class="mini">Your own history</div>
       <div class="meta">Wipes your answers, scores and unlocked policies and starts you
         at the beginning. It does not touch your account, your access, or anybody else.</div>
       <button id="setreset" class="ghost">Start over from scratch</button>
+    </div>
+
+    <div class="card stack">
+      <button id="setback" class="ghost">Back</button>
     </div>
   </div>
 

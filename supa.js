@@ -44,6 +44,24 @@ export async function signUp(email, password) {
 
 export function signOut() { setSession(null); }
 
+/** Changes the signed-in account's own password. Nobody else's: the token is
+    the account, so this cannot be aimed at another user. */
+export async function changePassword(newPassword) {
+  const token = await fresh();
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ password: newPassword }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.msg || data.error_description || data.message || 'that password was refused');
+  return true;
+}
+
 /** Keeps the token alive so the app does not log itself out mid-week. */
 async function fresh() {
   const s = session();

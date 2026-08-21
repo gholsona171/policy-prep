@@ -80,10 +80,15 @@ function rank(questions, progress, seed) {
  * ahead to a later one because it looks easier or more interesting. Revision of
  * finished material is allowed; jumping the queue is not.
  */
-export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZE, focusId = null) {
+export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZE, focusId = null,
+  { allowUnpassed = false } = {}) {
   const policies = store.index.policies;
   const requested = focusId ? policies.find((p) => p.id === focusId) : null;
-  const current = (requested && requested.passed ? requested : null)
+  // allowUnpassed is the personal "let me pick any section" switch. The sequence
+  // is still the default, because working one policy until it is clear is the
+  // point of the system; but somebody revising one specific area for a specific
+  // reason should not have to grind through everything before it.
+  const current = (requested && (requested.passed || allowUnpassed) ? requested : null)
     ?? policies.find((p) => !p.passed)
     ?? policies[policies.length - 1];
   if (!current) return { questions: [], currentId: null, currentCount: 0 };

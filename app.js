@@ -1,7 +1,9 @@
 import {
   buildSession, coverage, gate, policyStats, itemStats, CONFIG, setConfig,
 } from './engine.js';
-import { signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl, db } from './supa.js';
+import {
+  signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl, db, changePassword,
+} from './supa.js';
 import { syncAll } from './sync.js';
 
 /* The local copy is the working copy: every answer is recorded here first, so a session
@@ -110,9 +112,12 @@ function renderHome() {
     const c = coverage(store.items[p.id], bank);
     const g = gate(p.id, store.items[p.id], store.progress, bank);
     const st = policyStats(p.id, store.items[p.id], bank, store.progress);
-    const state = p.passed ? 'passed' : p.id === focusId ? 'in focus' : 'locked';
+    const state = p.passed ? 'passed'
+      : p.id === focusId ? 'in focus'
+      : unlockedAll() ? 'open' : 'locked';
     const status = p.passed ? 'Cleared. Still appears in review.'
       : p.id === focusId ? g.reason
+      : state === 'open' ? g.reason
       : 'Locked until the policy above is passed.';
     const leech = g.leeches.length
       ? `<div class="keylist">${g.leeches.slice(0, 4).map((l) =>
@@ -195,6 +200,15 @@ async function openPdf() {
     mix (mostly current, some review); a policy already passed is a straight
     drill on that one. */
 function startSection(id) {
+  // With the personal unlock on, any section can be taken directly.
+  if (unlockedAll()) {
+    if (settings().require_read_first && !hasRead(id)) {
+      const p = store.index.policies.find((x) => x.id === id);
+      alert(`Read ${p ? p.title : 'the policy'} first, then take the test on it.`);
+      return openReading(id);
+    }
+    return start(id, true);
+  }
   // If the owner has switched it on, the policy has to have been opened once
   // before its test will start. Read locally, because who has read what is a
   // nudge, not a record worth syncing.
@@ -254,8 +268,8 @@ function renderStats() {
 
 /* ------------------------------------------------------------------ quiz */
 
-function start(focusId = null) {
-  const built = buildSession(store, Date.now(), CONFIG.SESSION_SIZE, focusId);
+function start(focusId = null, allowUnpassed = false) {
+  const built = buildSession(store, Date.now(), CONFIG.SESSION_SIZE, focusId, { allowUnpassed });
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
   keepSession();
@@ -364,6 +378,25 @@ function settings() {
   return store.settings || {};
 }
 
+/* Personal preferences. These live on the phone, not the server, because they
+   are about how one person wants to use the app and nobody else is affected by
+   them. The master's switches remain the default; these override for this
+   account on this device. */
+const PREFS_KEY = 'policy-prep-prefs';
+function prefs() {
+  try { return { speak: null, unlockAll: false, ...JSON.parse(localStorage.getItem(PREFS_KEY)) }; }
+  catch { return { speak: null, unlockAll: false }; }
+}
+function setPref(key, value) {
+  const p = prefs();
+  p[key] = value;
+  localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+}
+/** Reading aloud: the person's own choice if they have made one, else whatever
+    the master set. */
+const speakOn = () => (prefs().speak === null ? settings().speak_answers === true : prefs().speak === true);
+const unlockedAll = () => prefs().unlockAll === true;
+
 /** Pushes saved settings into the engine and into the parts of the screen that
     a switch is supposed to control. */
 function applySettings() {
@@ -378,7 +411,7 @@ function applySettings() {
 /** Reads a question or a verdict out loud, when that switch is on. Uses the
     voice already in the phone, so it costs nothing and works offline. */
 function speak(text) {
-  if (!settings().speak_answers || !('speechSynthesis' in window)) return;
+  if (!speakOn() || !('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(String(text));
@@ -388,6 +421,15 @@ function speak(text) {
 }
 
 function paintSettings() {
+  // The master block is hidden for everyone else, and the database refuses
+  // their writes regardless of what this screen shows.
+  $('masteronly').classList.toggle('hide', !isMaster);
+  $('prefSpeak').dataset.on = String(speakOn());
+  $('prefUnlock').dataset.on = String(unlockedAll());
+  $('pwNew').value = '';
+  $('pwAgain').value = '';
+  $('pwMsg').textContent = '';
+
   const s = settings();
   $('setSize').value = s.session_size ?? 40;
   $('setMix').value = s.mix_current ?? 80;
@@ -430,6 +472,22 @@ async function resetProgress() {
   }
   btn.textContent = 'Start over from scratch';
   btn.disabled = false;
+}
+
+async function changeMyPassword() {
+  const a = $('pwNew').value;
+  const b = $('pwAgain').value;
+  if (a.length < 8) { $('pwMsg').textContent = 'At least 8 characters.'; return; }
+  if (a !== b) { $('pwMsg').textContent = 'Those two do not match.'; return; }
+  $('pwSave').disabled = true;
+  $('pwMsg').textContent = 'Changing...';
+  try {
+    await changePassword(a);
+    $('pwNew').value = '';
+    $('pwAgain').value = '';
+    $('pwMsg').textContent = 'Done. Use the new one next time you sign in.';
+  } catch (e) { $('pwMsg').textContent = e.message; }
+  $('pwSave').disabled = false;
 }
 
 async function saveSettings() {
@@ -626,7 +684,21 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 $('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
 $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
 $('tosettings').onclick = () => { paintSettings(); go('settings'); };
+$('tosettings2').onclick = () => { paintSettings(); go('settings'); };
 $('setback').onclick = () => { renderHome(); go('home'); };
+$('pwSave').onclick = () => changeMyPassword();
+$('prefSpeak').onclick = function () {
+  const on = this.dataset.on !== 'true';
+  this.dataset.on = String(on);
+  setPref('speak', on);
+  if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+};
+$('prefUnlock').onclick = function () {
+  const on = this.dataset.on !== 'true';
+  this.dataset.on = String(on);
+  setPref('unlockAll', on);
+  renderHome();
+};
 $('setsave').onclick = () => saveSettings();
 $('setreset').onclick = () => resetProgress();
 Object.keys(SWITCHES).forEach((id) => {
@@ -650,7 +722,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v14';
+export const APP_VERSION = 'v15';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
