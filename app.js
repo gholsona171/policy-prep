@@ -456,6 +456,12 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 $('quit').onclick = () => (S.answered ? finish() : go('home'));
 $('home2').onclick = () => { renderHome(); go('home'); };
 
+/* Tells the recovery script in index.html that the modules loaded and ran. Set
+   before anything that could throw, because the point is to prove the imports
+   resolved, not that the whole app is happy. */
+window.policyPrepBooted = true;
+sessionStorage.removeItem('policy-prep-recovered');
+
 if (signedIn()) { renderHome(); go('home'); checkMaster(); sync(true); } else { go('auth'); }
 window.addEventListener('online', () => sync(true));
 
@@ -464,7 +470,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v9';
+export const APP_VERSION = 'v10';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
@@ -474,7 +480,10 @@ if ('serviceWorker' in navigator) {
     location.reload();
   });
 
-  navigator.serviceWorker.register('sw.js').then((reg) => {
+  // updateViaCache 'none' so the worker script itself is never served from the
+  // browser's own HTTP cache; otherwise a phone can sit on a stale worker for
+  // hours and keep handing out last week's files.
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
     reg.update().catch(() => {});
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') reg.update().catch(() => {});

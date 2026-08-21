@@ -210,6 +210,45 @@
   </div>
 
 </div>
+<!-- Self-repair, and it must be a plain script: a module cannot rescue a module.
+
+     An installed app updates file by file. If a stale service worker serves an
+     old copy of one file next to a new copy of another, the import fails and
+     the screen stays black with nothing to tap, on a phone, with no console.
+     That is a dead app until someone deletes and reinstalls it.
+
+     So: if the app has not signalled that it booted, throw away every service
+     worker and every cache and reload once. Once per session, so a genuine
+     failure cannot become a reload loop. -->
+<script>
+(function () {
+  var KEY = 'policy-prep-recovered';
+  var nuked = false;
+
+  function nuke(reason) {
+    if (nuked || sessionStorage.getItem(KEY)) return;
+    nuked = true;
+    sessionStorage.setItem(KEY, reason);
+    var reload = function () { location.reload(); };
+    if (!('serviceWorker' in navigator)) return reload();
+    navigator.serviceWorker.getRegistrations()
+      .then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); })
+      .then(function () { return caches.keys(); })
+      .then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); })
+      .then(reload, reload);
+  }
+
+  // A script or module that fails to load fires an error on its element.
+  window.addEventListener('error', function (e) {
+    if (e.target && e.target.tagName === 'SCRIPT') nuke('script-failed');
+  }, true);
+
+  // Belt and braces: nothing rendered and no boot signal means something is wrong.
+  window.addEventListener('load', function () {
+    setTimeout(function () { if (!window.policyPrepBooted) nuke('never-booted'); }, 6000);
+  });
+})();
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
