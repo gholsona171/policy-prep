@@ -400,6 +400,38 @@ function paintSettings() {
   $('setmsg').textContent = '';
 }
 
+/** Wipes this account's study history, on the server and on this phone.
+    Two taps, because it cannot be undone. */
+async function resetProgress() {
+  const btn = $('setreset');
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Really wipe everything? Tap again';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Start over from scratch'; }, 5000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = 'Wiping...';
+  btn.disabled = true;
+  try {
+    const r = await rpc('reset_my_progress');
+    // Local first, so a phone that goes offline right now does not carry the
+    // old history back up on the next sync.
+    store.progress = { answers: [], sessions: [] };
+    store.open = null;
+    store.index.policies.forEach((p) => { p.passed = false; });
+    localStorage.removeItem(READ_KEY);
+    save();
+    $('setmsg').textContent =
+      `Wiped ${r?.answers ?? 0} answer(s) and ${r?.sessions ?? 0} session(s). You are back at the start.`;
+    renderHome();
+  } catch (e) {
+    $('setmsg').textContent = e.message;
+  }
+  btn.textContent = 'Start over from scratch';
+  btn.disabled = false;
+}
+
 async function saveSettings() {
   const body = {
     session_size: Number($('setSize').value),
@@ -596,6 +628,7 @@ $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), r
 $('tosettings').onclick = () => { paintSettings(); go('settings'); };
 $('setback').onclick = () => { renderHome(); go('home'); };
 $('setsave').onclick = () => saveSettings();
+$('setreset').onclick = () => resetProgress();
 Object.keys(SWITCHES).forEach((id) => {
   $(id).onclick = function () { this.dataset.on = this.dataset.on === 'true' ? 'false' : 'true'; };
 });
@@ -617,7 +650,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v13';
+export const APP_VERSION = 'v14';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

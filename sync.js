@@ -114,8 +114,11 @@ export async function pullProgress(store) {
     currentCount: s.current_count, asked: s.asked, right: s.correct, pct: s.pct, synced: true,
   }));
 
+  // Both directions. Setting passed only when the server says so meant a policy
+  // could never become un-passed, so wiping your history left every policy
+  // still unlocked and the app claiming work you no longer had a record of.
   const passedIds = new Set((states ?? []).filter((s) => s.passed).map((s) => s.policy_id));
-  store.index.policies.forEach((p) => { if (passedIds.has(p.id)) p.passed = true; });
+  store.index.policies.forEach((p) => { p.passed = passedIds.has(p.id); });
 }
 
 /** One round trip: send what is queued, then take the server's version of everything. */
