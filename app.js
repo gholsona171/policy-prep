@@ -15,7 +15,11 @@ const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
 const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings'];
-const go = (name) => { screens.forEach(hide); show(name); window.scrollTo(0, 0); };
+const go = (name) => {
+  screens.forEach(hide); show(name); window.scrollTo(0, 0);
+  // The corner switch is for people using the app, not for the sign-in screen.
+  paintMic(name !== 'auth');
+};
 
 const blank = () => ({
   index: { policies: [] }, items: {}, banks: {},
@@ -423,7 +427,11 @@ function setPref(key, value) {
 }
 /** Reading aloud: the person's own choice if they have made one, else whatever
     the master set. */
-const speakOn = () => (prefs().speak === null ? settings().speak_answers === true : prefs().speak === true);
+/* Off unless this person has deliberately switched it on. It used to fall back to
+   the master's speak_answers switch, which meant one setting could make everyone
+   else's phone start talking. Reading aloud belongs to whoever is holding the
+   phone, and silence is the safe default in a room full of people. */
+const speakOn = () => prefs().speak === true;
 const unlockedAll = () => prefs().unlockAll === true;
 
 /** Pushes saved settings into the engine and into the parts of the screen that
@@ -449,11 +457,41 @@ function speak(text) {
   } catch { /* a phone that will not speak is not a reason to stop the quiz */ }
 }
 
+/** The address to hand out, read off the browser rather than written down here,
+    so it stays right if the app is ever moved to another host. */
+function appLink() {
+  return (location.origin + location.pathname).replace(/index\.html$/, '');
+}
+
+/** The corner switch. `visible` false leaves it hidden without touching the
+    preference, so signing out does not silently turn reading aloud back on. */
+function paintMic(visible) {
+  const el = $('micToggle');
+  if (!el) return;
+  el.classList.toggle('hide', !visible);
+  document.body.classList.toggle('hasmic', !!visible);
+  const on = speakOn();
+  el.dataset.on = String(on);
+  el.setAttribute('aria-pressed', String(on));
+  el.textContent = on ? 'Aloud: on' : 'Aloud: off';
+}
+
+/** One switch, two places on screen. Whichever is tapped, both must agree. */
+function setSpeak(on) {
+  setPref('speak', on);
+  if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+  paintMic(!$('micToggle').classList.contains('hide'));
+  const pref = $('prefSpeak');
+  if (pref) pref.dataset.on = String(on);
+}
+
 function paintSettings() {
   // The master block is hidden for everyone else, and the database refuses
   // their writes regardless of what this screen shows.
   $('masteronly').classList.toggle('hide', !isMaster);
   $('prefSpeak').dataset.on = String(speakOn());
+  $('applink').textContent = appLink();
+  $('copymsg').textContent = 'Send them this, then create their account above.';
   $('prefUnlock').dataset.on = String(unlockedAll());
   $('pwNew').value = '';
   $('pwAgain').value = '';
@@ -715,11 +753,13 @@ $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), r
 $('tosettings').onclick = () => { paintSettings(); go('settings'); };
 $('setback').onclick = () => { renderHome(); go('home'); };
 $('pwSave').onclick = () => changeMyPassword();
-$('prefSpeak').onclick = function () {
-  const on = this.dataset.on !== 'true';
-  this.dataset.on = String(on);
-  setPref('speak', on);
-  if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+$('prefSpeak').onclick = function () { setSpeak(this.dataset.on !== 'true'); };
+$('micToggle').onclick = function () { setSpeak(this.dataset.on !== 'true'); };
+$('copylink').onclick = () => {
+  const url = appLink();
+  navigator.clipboard?.writeText(url)
+    .then(() => { $('copymsg').textContent = 'Copied. Paste it to them.'; })
+    .catch(() => { $('copymsg').textContent = 'Could not copy. The address is above.'; });
 };
 $('prefUnlock').onclick = function () {
   const on = this.dataset.on !== 'true';
@@ -750,7 +790,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v17';
+export const APP_VERSION = 'v18';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

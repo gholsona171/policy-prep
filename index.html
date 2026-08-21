@@ -93,9 +93,23 @@
     border-radius:20px;padding:3px 9px}
   .toggle[data-on="true"]{border-color:#20503c;background:#132a20}
   .toggle[data-on="true"]:after{content:'ON';color:var(--ok);border-color:#20503c}
+  /* Reading aloud is the one switch someone reaches for mid-question, so it sits
+     in the top left corner on every screen instead of at the bottom of Settings.
+     Fixed, not in the flow, so it survives scrolling. */
+  .mic{position:fixed;z-index:50;width:auto;
+    top:calc(8px + env(safe-area-inset-top));left:calc(10px + env(safe-area-inset-left));
+    background:var(--panel);border:1px solid var(--line);color:var(--dim);
+    border-radius:20px;padding:8px 13px;font-size:13px;font-weight:500;line-height:1;
+    box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  .mic[data-on="true"]{color:var(--ok);border-color:#20503c}
+  /* The corner button would otherwise sit on top of the heading. */
+  body.hasmic .wrap{padding-top:calc(54px + env(safe-area-inset-top))}
 </style>
 </head>
 <body>
+<!-- Hidden until someone is signed in. Off unless they turn it on: a phone that
+     starts talking by itself in a briefing room is not a feature. -->
+<button id="micToggle" class="mic hide" data-on="false" aria-pressed="false">Aloud: off</button>
 <div class="wrap">
 
   <div id="auth" class="hide">
@@ -201,6 +215,15 @@
     <div id="masteronly">
     <p class="sub">Everything below is yours alone as the master account, and applies to
       everyone using the app.</p>
+
+    <!-- The address to hand out. Nobody remembers it, and looking it up on a
+         phone in front of the person you are selling to is not a good look. -->
+    <div class="card stack">
+      <div class="mini">The link to give people</div>
+      <div class="meta" id="applink" style="word-break:break-all;color:var(--ink)"></div>
+      <button id="copylink" class="ghost">Copy the link</button>
+      <div class="meta" id="copymsg">Send them this, then create their account above.</div>
+    </div>
 
     <div class="card stack">
       <div class="mini">The session</div>
