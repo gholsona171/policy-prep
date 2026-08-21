@@ -4,33 +4,20 @@
    Deliberately dependency free and deterministic: nothing here calls a model, so a
    session can never be steered by something decided in the moment. */
 
-/* The numbers the master account can move, and what they were before anyone
-   could move them. Held in one mutable object rather than as constants so the
-   settings pulled from the server can replace them at startup without every
-   function having to take five more arguments. */
+/* THESE ARE NOT SETTINGS AND MUST NOT BECOME SETTINGS AGAIN.
+   They were briefly adjustable from the master profile. That was a mistake and was
+   removed on 21 Aug 2026 at Anton's instruction. A dial that changes how a pass is
+   earned is not a preference: moved by accident, it silently rewrites what "cleared"
+   means, and every session already recorded under the old number keeps counting as
+   though nothing changed. There is no way to notice that from inside the app.
+
+   The size of a session is not here either, because it is not a number anyone picks.
+   A session is the whole policy: see sessionSize(). */
 export const CONFIG = {
   MIX_CURRENT: 0.8,          // share of a session spent on the policy in focus
-  SESSION_SIZE: 40,
   LEECH_THRESHOLD: 2,        // misses before an item is treated as a leech
   PASS_PCT: 90,
-  MIN_CURRENT_IN_GATE: 30,   // questions a session needs before it can count
 };
-
-/** Applies saved settings. Anything missing keeps the built-in default, so a
-    half-filled row or an old app can never produce a nonsense session. */
-export function setConfig(s) {
-  if (!s) return CONFIG;
-  const num = (v, lo, hi, fallback) => {
-    const n = Number(v);
-    return Number.isFinite(n) && n >= lo && n <= hi ? n : fallback;
-  };
-  CONFIG.SESSION_SIZE = num(s.session_size, 5, 200, CONFIG.SESSION_SIZE);
-  CONFIG.PASS_PCT = num(s.pass_pct, 50, 100, CONFIG.PASS_PCT);
-  CONFIG.MIX_CURRENT = num(s.mix_current, 0, 100, CONFIG.MIX_CURRENT * 100) / 100;
-  CONFIG.LEECH_THRESHOLD = num(s.leech_threshold, 1, 10, CONFIG.LEECH_THRESHOLD);
-  CONFIG.MIN_CURRENT_IN_GATE = num(s.min_current_in_gate, 1, 200, CONFIG.MIN_CURRENT_IN_GATE);
-  return CONFIG;
-}
 
 export function itemStats(progress, itemId) {
   const answers = progress.answers.filter((a) => a.itemId === itemId);
@@ -72,6 +59,13 @@ function rank(questions, progress, seed) {
     .map((r) => r.q);
 }
 
+/** A session is every question in the policy, so finishing one covers the section.
+    Derived from the bank at build time, never configured: it follows the policy the
+    import produced, which is the only number that means anything here. */
+export function sessionSize(bank) {
+  return bank?.questions?.length ?? 0;
+}
+
 /**
  * @param focusId  optional: revisit a policy you have ALREADY PASSED.
  *
@@ -80,7 +74,7 @@ function rank(questions, progress, seed) {
  * ahead to a later one because it looks easier or more interesting. Revision of
  * finished material is allowed; jumping the queue is not.
  */
-export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZE, focusId = null,
+export function buildSession(store, seed = Date.now(), focusId = null,
   { allowUnpassed = false } = {}) {
   const policies = store.index.policies;
   const requested = focusId ? policies.find((p) => p.id === focusId) : null;
@@ -101,9 +95,14 @@ export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZ
   const currentPool = rank(store.banks[current.id]?.questions ?? [], store.progress, seed);
   const reviewPool = rank(passedIds.flatMap((id) => store.banks[id]?.questions ?? []), store.progress, seed + 1);
 
-  const wantReview = passedIds.length ? Math.round(size * (1 - CONFIG.MIX_CURRENT)) : 0;
+  /* The whole current policy, then review on top in the same 80/20 proportion as
+     before. Review rides on top rather than eating into the section, because taking
+     its place would mean a session no longer covers the policy and the whole point
+     of one sitting per section would be lost. */
+  const cur = currentPool;
+  const wantReview = passedIds.length
+    ? Math.round((cur.length * (1 - CONFIG.MIX_CURRENT)) / CONFIG.MIX_CURRENT) : 0;
   const review = reviewPool.slice(0, wantReview);
-  const cur = currentPool.slice(0, size - review.length);
 
   return {
     questions: shuffle(cur.concat(review), seed + 2),
@@ -127,15 +126,16 @@ export function leeches(items, progress) {
 }
 
 /**
- * How many questions from a policy a session must contain before its score counts.
+ * How many questions from a policy a session must contain before its score counts:
+ * all of them.
  *
- * A flat 30 would make any policy with a smaller bank impossible to pass, which is a
- * real case: some real policies are two pages. So the requirement scales down to 80% of
- * whatever bank exists, and 30 is only the ceiling.
+ * This used to be a sample, thirty by default and adjustable. Both are gone. A score
+ * on thirty of fifty seven questions says nothing about the twenty seven never asked,
+ * and a sample size anyone can lower is a pass mark anyone can lower. Since a session
+ * is now the whole policy, clearing one is a single honest sitting.
  */
 export function requiredForGate(bank) {
-  const size = bank?.questions?.length ?? 0;
-  return Math.min(CONFIG.MIN_CURRENT_IN_GATE, Math.max(1, Math.ceil(size * 0.8)));
+  return Math.max(1, sessionSize(bank));
 }
 
 /** How many of a policy's questions have been answered at least once. */
@@ -175,7 +175,7 @@ export function gate(policyId, items, progress, bank) {
     reason: !cov.complete
       ? `${cov.total - cov.done} of ${cov.total} questions in this policy still unanswered.`
       : !best
-      ? `No qualifying session yet (needs ${need}+ questions from this policy).`
+      ? `No complete sitting yet. A qualifying session is all ${need} questions in one go.`
       : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${CONFIG.PASS_PCT}%.`
       : outstanding.length ? `${outstanding.length} item(s) still wrong after ${CONFIG.LEECH_THRESHOLD}+ misses.`
       : 'Passed.',

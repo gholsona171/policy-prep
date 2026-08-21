@@ -1,5 +1,5 @@
 import {
-  buildSession, coverage, gate, policyStats, itemStats, CONFIG, setConfig,
+  buildSession, coverage, gate, policyStats, itemStats,
 } from './engine.js';
 import {
   signIn, signUp, signOut, signedIn, currentEmail, rpc, policyPdfUrl, db, changePassword,
@@ -334,7 +334,9 @@ function renderStats() {
 /* ------------------------------------------------------------------ quiz */
 
 function start(focusId = null, allowUnpassed = false) {
-  const built = buildSession(store, Date.now(), CONFIG.SESSION_SIZE, focusId, { allowUnpassed });
+  // No size argument any more: a session is the whole policy, and the engine reads
+  // that off the bank the import produced.
+  const built = buildSession(store, Date.now(), focusId, { allowUnpassed });
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
   keepSession();
@@ -488,11 +490,10 @@ function setPref(key, value) {
 const speakOn = () => prefs().speak === true;
 const unlockedAll = () => prefs().unlockAll === true;
 
-/** Pushes saved settings into the engine and into the parts of the screen that
-    a switch is supposed to control. */
+/** Applies the switches to the parts of the screen they control. Nothing here
+    reaches the engine any more: the rules that decide a pass are fixed in code. */
 function applySettings() {
   const s = settings();
-  setConfig(s);
   // A stranger creating an account gets nothing without an entitlement, but if
   // the owner would rather they could not, the button goes.
   $('signup').classList.toggle('hide', s.allow_self_signup === false);
@@ -552,11 +553,6 @@ function paintSettings() {
   $('pwMsg').textContent = '';
 
   const s = settings();
-  $('setSize').value = s.session_size ?? 40;
-  $('setMix').value = s.mix_current ?? 80;
-  $('setPass').value = s.pass_pct ?? 90;
-  $('setGate').value = s.min_current_in_gate ?? 30;
-  $('setLeech').value = s.leech_threshold ?? 2;
   Object.entries(SWITCHES).forEach(([id, col]) => {
     $(id).dataset.on = String(s[col] === true);
   });
@@ -612,14 +608,11 @@ async function changeMyPassword() {
 }
 
 async function saveSettings() {
-  const body = {
-    session_size: Number($('setSize').value),
-    mix_current: Number($('setMix').value),
-    pass_pct: Number($('setPass').value),
-    min_current_in_gate: Number($('setGate').value),
-    leech_threshold: Number($('setLeech').value),
-    updated_at: new Date().toISOString(),
-  };
+  /* Switches only. The five numbers that used to live here decided how a pass was
+     earned, and they are now fixed in engine.js where nobody can nudge them. The
+     columns are left alone rather than written with defaults: this screen no longer
+     has an opinion about them. */
+  const body = { updated_at: new Date().toISOString() };
   Object.entries(SWITCHES).forEach(([id, col]) => { body[col] = $(id).dataset.on === 'true'; });
 
   $('setsave').disabled = true;
@@ -860,7 +853,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v22';
+export const APP_VERSION = 'v23';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

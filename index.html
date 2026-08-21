@@ -240,21 +240,13 @@
     </div>
 
     <div class="card stack">
-      <div class="mini">The session</div>
-      <label class="meta" for="setSize">Questions per session</label>
-      <input type="number" id="setSize" min="5" max="200" inputmode="numeric">
-      <label class="meta" for="setMix">Percent of a session spent on the current policy</label>
-      <input type="number" id="setMix" min="0" max="100" inputmode="numeric">
-    </div>
-
-    <div class="card stack">
-      <div class="mini">Passing</div>
-      <label class="meta" for="setPass">Score needed to clear a policy (percent)</label>
-      <input type="number" id="setPass" min="50" max="100" inputmode="numeric">
-      <label class="meta" for="setGate">Questions a session needs before it counts</label>
-      <input type="number" id="setGate" min="1" max="200" inputmode="numeric">
-      <label class="meta" for="setLeech">Misses before an item is treated as a weak spot</label>
-      <input type="number" id="setLeech" min="1" max="10" inputmode="numeric">
+      <div class="mini">How a section is cleared</div>
+      <div class="meta">
+        A session is every question in the policy, however many that policy turned out
+        to have. Clearing it needs 90 percent in one sitting and nothing still wrong
+        after two misses. These are fixed on purpose: a number that decides what
+        counts as passed is not a preference.
+      </div>
     </div>
 
     <div class="card stack">
