@@ -1,7 +1,7 @@
 import {
   buildSession, coverage, gate, policyStats, itemStats, SESSION_SIZE,
 } from './engine.js';
-import { signIn, signUp, signOut, signedIn, currentEmail, rpc } from './supa.js';
+import { signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl } from './supa.js';
 import { syncAll } from './sync.js';
 
 /* The local copy is the working copy: every answer is recorded here first, so a session
@@ -151,7 +151,29 @@ function openReading(id) {
   $('readsource').textContent = p.source || '';
   $('readbody').textContent = p.text;
   $('readtest').textContent = p.passed ? 'Revise this one' : 'Take the test on this';
+  $('pdfmsg').textContent = '';
   go('read');
+}
+
+/** The department's own document, laid out the way they laid it out. The link
+    is signed on the spot rather than stored, so it cannot be shared around
+    after the fact, and it needs a live connection: the text above works
+    offline, the PDF does not. */
+async function openPdf() {
+  if (!reading) return;
+  const btn = $('readpdf');
+  btn.disabled = true;
+  $('pdfmsg').textContent = 'Fetching...';
+  try {
+    const url = await signedFileUrl('policy-pdfs', `${reading}.pdf`);
+    $('pdfmsg').textContent = '';
+    window.open(url, '_blank');
+  } catch (e) {
+    $('pdfmsg').textContent = navigator.onLine
+      ? e.message
+      : 'The PDF needs a connection. The text above works offline.';
+  }
+  btn.disabled = false;
 }
 
 /** Starting a section from its own card. The policy in focus keeps the normal
@@ -425,6 +447,7 @@ $('tostats').onclick = () => { renderStats(); go('stats'); };
 $('statsback').onclick = () => { renderHome(); go('home'); };
 $('readback').onclick = () => { renderHome(); go('home'); };
 $('readtest').onclick = () => startSection(reading);
+$('readpdf').onclick = () => openPdf();
 $('start').onclick = () => start();
 // Deliberately follows the normal sequence rather than repeating the last focus: after
 // passing, "another session" should move you on, not park you on finished material.
@@ -441,7 +464,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v8';
+export const APP_VERSION = 'v9';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

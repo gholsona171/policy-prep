@@ -75,6 +75,27 @@ export async function rpc(name, args = {}) {
   return data;
 }
 
+/** A short-lived link to a file in a private bucket.
+
+    The PDFs are not public and never should be: they are the product, and they
+    are the department's documents. The bucket's rule only lets a signed-in user
+    with live access sign a link, and the link dies after an hour. */
+export async function signedFileUrl(bucket, file, seconds = 3600) {
+  const token = await fresh();
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/${bucket}/${file}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ expiresIn: seconds }),
+  });
+  if (!res.ok) throw new Error('that file is not available on this account');
+  const { signedURL } = await res.json();
+  return `${SUPABASE_URL}/storage/v1${signedURL}`;
+}
+
 /** REST helper. `path` is everything after /rest/v1/, e.g. "questions?select=*". */
 export async function db(path, { method = 'GET', body, prefer } = {}) {
   const token = await fresh();
