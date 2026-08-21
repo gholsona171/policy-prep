@@ -121,7 +121,10 @@ export async function pullProgress(store) {
 /** One round trip: send what is queued, then take the server's version of everything. */
 export async function syncAll(store) {
   await pushProgress(store);
-  await pullSettings(store);
+  // Settings are a convenience; the engine has working defaults without them.
+  // Letting a settings failure abort the sync would stop new policies and
+  // answered questions moving, which is the part that actually matters.
+  try { await pullSettings(store); } catch { /* keep whatever we had */ }
   await pullContent(store);
   await pullProgress(store);
 }
