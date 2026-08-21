@@ -374,11 +374,13 @@ function finish() {
 /* One row in the database, read by every phone, writable only by a master.
    Applied here in one place so there is never a screen obeying an old value. */
 
+/* Reading aloud is deliberately NOT here: it is a personal preference, owned by
+   whoever is using the app, and having it in both places meant two switches
+   that could disagree about the same thing. */
 const SWITCHES = {
   setSignup: 'allow_self_signup',
   setPdf: 'show_pdf',
   setRead: 'require_read_first',
-  setSpeak: 'speak_answers',
 };
 
 function settings() {
@@ -691,7 +693,6 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 $('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
 $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
 $('tosettings').onclick = () => { paintSettings(); go('settings'); };
-$('tosettings2').onclick = () => { paintSettings(); go('settings'); };
 $('setback').onclick = () => { renderHome(); go('home'); };
 $('pwSave').onclick = () => changeMyPassword();
 $('prefSpeak').onclick = function () {
@@ -729,7 +730,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v15';
+export const APP_VERSION = 'v16';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
