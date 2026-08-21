@@ -8,6 +8,14 @@ import { db, currentUserId } from './supa.js';
              and pulled back, so a second device or a reinstalled phone sees the same
              history. Nothing depends on being online at the moment you answer. */
 
+/** The master's switches. Everyone reads them, only a master can change them,
+    and the engine falls back to its own defaults if this ever comes back empty. */
+export async function pullSettings(store) {
+  const rows = await db('app_settings?select=*&limit=1');
+  if (Array.isArray(rows) && rows[0]) store.settings = rows[0];
+  return store.settings;
+}
+
 export async function pullContent(store) {
   const policies = await db(
     'policies?select=id,title,sort_order,version,body_text,source_ref&order=sort_order');
@@ -113,6 +121,7 @@ export async function pullProgress(store) {
 /** One round trip: send what is queued, then take the server's version of everything. */
 export async function syncAll(store) {
   await pushProgress(store);
+  await pullSettings(store);
   await pullContent(store);
   await pullProgress(store);
 }

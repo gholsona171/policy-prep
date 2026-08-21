@@ -61,7 +61,7 @@
   .keylist div:last-child{border-bottom:0}
   .bad{color:var(--bad)} .good{color:var(--ok)}
   button.small{width:auto;padding:9px 14px;font-size:13px}
-  input[type=email],input[type=password],input[type=text],select{width:100%;background:#141821;
+  input[type=email],input[type=password],input[type=text],input[type=number],select{width:100%;background:#141821;
     color:var(--ink);border:1px solid var(--line);border-radius:11px;padding:14px;font:16px/1.3 inherit}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
   /* The master card. Only an account listed in the masters table ever sees it, and the
@@ -82,6 +82,17 @@
   .policy b{color:#fff}
   .twoup{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
   .twoup button{width:100%}
+  /* A switch that reads as on or off at a glance, without a checkbox that iOS
+     styles into something nobody can see on a dark background. */
+  /* A label belongs above its box, not beside it: on a narrow screen an inline
+     label wraps into the next setting's label and they read as one sentence. */
+  label.meta{display:block;margin-bottom:-3px}
+  .toggle{text-align:left;position:relative;padding-right:64px}
+  .toggle:after{content:'OFF';position:absolute;right:14px;top:50%;transform:translateY(-50%);
+    font-size:11px;letter-spacing:1px;color:var(--dim);border:1px solid var(--line);
+    border-radius:20px;padding:3px 9px}
+  .toggle[data-on="true"]{border-color:#20503c;background:#132a20}
+  .toggle[data-on="true"]:after{content:'ON';color:var(--ok);border-color:#20503c}
 </style>
 </head>
 <body>
@@ -151,6 +162,7 @@
 
       <button id="mnew">Add a person</button>
       <button id="mlistbtn" class="ghost">Who has access</button>
+      <button id="tosettings" class="ghost">Settings</button>
       <div id="mlist"></div>
     </div>
 
@@ -158,6 +170,45 @@
       <div class="meta" id="whoami"></div>
       <div class="mini" id="version"></div>
       <button id="signout" class="ghost">Sign out</button>
+    </div>
+  </div>
+
+  <!-- Master only. Everyone reads these; only a master can change them, and the
+       database enforces that regardless of what this screen shows. -->
+  <div id="settings" class="hide">
+    <h1>Settings</h1>
+    <p class="sub">These apply to everyone using the app, including your customers.</p>
+
+    <div class="card stack">
+      <div class="mini">The session</div>
+      <label class="meta" for="setSize">Questions per session</label>
+      <input type="number" id="setSize" min="5" max="200" inputmode="numeric">
+      <label class="meta" for="setMix">Percent of a session spent on the current policy</label>
+      <input type="number" id="setMix" min="0" max="100" inputmode="numeric">
+    </div>
+
+    <div class="card stack">
+      <div class="mini">Passing</div>
+      <label class="meta" for="setPass">Score needed to clear a policy (percent)</label>
+      <input type="number" id="setPass" min="50" max="100" inputmode="numeric">
+      <label class="meta" for="setGate">Questions a session needs before it counts</label>
+      <input type="number" id="setGate" min="1" max="200" inputmode="numeric">
+      <label class="meta" for="setLeech">Misses before an item is treated as a weak spot</label>
+      <input type="number" id="setLeech" min="1" max="10" inputmode="numeric">
+    </div>
+
+    <div class="card stack">
+      <div class="mini">Switches</div>
+      <button class="toggle ghost" id="setSignup" data-on="false">Let strangers create their own account</button>
+      <button class="toggle ghost" id="setPdf" data-on="false">Offer the original PDF</button>
+      <button class="toggle ghost" id="setRead" data-on="false">Make them read the policy before testing it</button>
+      <button class="toggle ghost" id="setSpeak" data-on="false">Read questions and answers aloud</button>
+    </div>
+
+    <div class="card stack">
+      <div class="meta" id="setmsg"></div>
+      <button id="setsave">Save</button>
+      <button id="setback" class="ghost">Back</button>
     </div>
   </div>
 

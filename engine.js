@@ -4,11 +4,33 @@
    Deliberately dependency free and deterministic: nothing here calls a model, so a
    session can never be steered by something decided in the moment. */
 
-export const MIX_CURRENT = 0.8;
-export const SESSION_SIZE = 40;
-export const LEECH_THRESHOLD = 2;
-export const PASS_PCT = 90;
-export const MIN_CURRENT_IN_GATE = 30;
+/* The numbers the master account can move, and what they were before anyone
+   could move them. Held in one mutable object rather than as constants so the
+   settings pulled from the server can replace them at startup without every
+   function having to take five more arguments. */
+export const CONFIG = {
+  MIX_CURRENT: 0.8,          // share of a session spent on the policy in focus
+  SESSION_SIZE: 40,
+  LEECH_THRESHOLD: 2,        // misses before an item is treated as a leech
+  PASS_PCT: 90,
+  MIN_CURRENT_IN_GATE: 30,   // questions a session needs before it can count
+};
+
+/** Applies saved settings. Anything missing keeps the built-in default, so a
+    half-filled row or an old app can never produce a nonsense session. */
+export function setConfig(s) {
+  if (!s) return CONFIG;
+  const num = (v, lo, hi, fallback) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= lo && n <= hi ? n : fallback;
+  };
+  CONFIG.SESSION_SIZE = num(s.session_size, 5, 200, CONFIG.SESSION_SIZE);
+  CONFIG.PASS_PCT = num(s.pass_pct, 50, 100, CONFIG.PASS_PCT);
+  CONFIG.MIX_CURRENT = num(s.mix_current, 0, 100, CONFIG.MIX_CURRENT * 100) / 100;
+  CONFIG.LEECH_THRESHOLD = num(s.leech_threshold, 1, 10, CONFIG.LEECH_THRESHOLD);
+  CONFIG.MIN_CURRENT_IN_GATE = num(s.min_current_in_gate, 1, 200, CONFIG.MIN_CURRENT_IN_GATE);
+  return CONFIG;
+}
 
 export function itemStats(progress, itemId) {
   const answers = progress.answers.filter((a) => a.itemId === itemId);
@@ -17,7 +39,7 @@ export function itemStats(progress, itemId) {
   const last = answers[answers.length - 1];
   return {
     seen: answers.length, wrong, resolved: last.correct, lastAt: last.at,
-    leech: wrong >= LEECH_THRESHOLD && !last.correct,
+    leech: wrong >= CONFIG.LEECH_THRESHOLD && !last.correct,
   };
 }
 
@@ -55,7 +77,7 @@ function rank(questions, progress, seed) {
  * ahead to a later one because it looks easier or more interesting. Revision of
  * finished material is allowed; jumping the queue is not.
  */
-export function buildSession(store, seed = Date.now(), size = SESSION_SIZE, focusId = null) {
+export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZE, focusId = null) {
   const policies = store.index.policies;
   const requested = focusId ? policies.find((p) => p.id === focusId) : null;
   const current = (requested && requested.passed ? requested : null)
@@ -67,7 +89,7 @@ export function buildSession(store, seed = Date.now(), size = SESSION_SIZE, focu
   const currentPool = rank(store.banks[current.id]?.questions ?? [], store.progress, seed);
   const reviewPool = rank(passedIds.flatMap((id) => store.banks[id]?.questions ?? []), store.progress, seed + 1);
 
-  const wantReview = passedIds.length ? Math.round(size * (1 - MIX_CURRENT)) : 0;
+  const wantReview = passedIds.length ? Math.round(size * (1 - CONFIG.MIX_CURRENT)) : 0;
   const review = reviewPool.slice(0, wantReview);
   const cur = currentPool.slice(0, size - review.length);
 
@@ -101,7 +123,7 @@ export function leeches(items, progress) {
  */
 export function requiredForGate(bank) {
   const size = bank?.questions?.length ?? 0;
-  return Math.min(MIN_CURRENT_IN_GATE, Math.max(1, Math.ceil(size * 0.8)));
+  return Math.min(CONFIG.MIN_CURRENT_IN_GATE, Math.max(1, Math.ceil(size * 0.8)));
 }
 
 /** Two conditions on purpose: a percentage alone can be cleared while still carrying a
@@ -113,7 +135,7 @@ export function gate(policyId, items, progress, bank) {
     .reduce((b, s) => (!b || s.pct > b.pct ? s : b), null);
 
   const outstanding = leeches(items, progress);
-  const scoreOk = !!best && best.pct >= PASS_PCT;
+  const scoreOk = !!best && best.pct >= CONFIG.PASS_PCT;
 
   return {
     passed: scoreOk && outstanding.length === 0,
@@ -123,8 +145,8 @@ export function gate(policyId, items, progress, bank) {
     leeches: outstanding,
     reason: !best
       ? `No qualifying session yet (needs ${need}+ questions from this policy).`
-      : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${PASS_PCT}%.`
-      : outstanding.length ? `${outstanding.length} item(s) still wrong after ${LEECH_THRESHOLD}+ misses.`
+      : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${CONFIG.PASS_PCT}%.`
+      : outstanding.length ? `${outstanding.length} item(s) still wrong after ${CONFIG.LEECH_THRESHOLD}+ misses.`
       : 'Passed.',
   };
 }

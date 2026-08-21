@@ -1,7 +1,7 @@
 import {
-  buildSession, coverage, gate, policyStats, itemStats, SESSION_SIZE,
+  buildSession, coverage, gate, policyStats, itemStats, CONFIG, setConfig,
 } from './engine.js';
-import { signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl } from './supa.js';
+import { signIn, signUp, signOut, signedIn, currentEmail, rpc, signedFileUrl, db } from './supa.js';
 import { syncAll } from './sync.js';
 
 /* The local copy is the working copy: every answer is recorded here first, so a session
@@ -12,7 +12,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings'];
 const go = (name) => { screens.forEach(hide); show(name); window.scrollTo(0, 0); };
 
 const blank = () => ({
@@ -41,6 +41,7 @@ async function sync(quiet) {
   if (!quiet) $('syncmsg').textContent = 'Checking...';
   try {
     await syncAll(store);
+    applySettings();
     save();
     renderHome();
     $('syncmsg').textContent = `Up to date. ${store.index.policies.length} policy(ies).`;
@@ -165,6 +166,7 @@ function openReading(id) {
   $('readbody').textContent = p.text;
   $('readtest').textContent = p.passed ? 'Revise this one' : 'Take the test on this';
   $('pdfmsg').textContent = '';
+  markRead(id);
   go('read');
 }
 
@@ -193,8 +195,24 @@ async function openPdf() {
     mix (mostly current, some review); a policy already passed is a straight
     drill on that one. */
 function startSection(id) {
+  // If the owner has switched it on, the policy has to have been opened once
+  // before its test will start. Read locally, because who has read what is a
+  // nudge, not a record worth syncing.
+  if (settings().require_read_first && !hasRead(id)) {
+    const p = store.index.policies.find((x) => x.id === id);
+    alert(`Read ${p ? p.title : 'the policy'} first, then take the test on it.`);
+    return openReading(id);
+  }
   const focusId = store.index.policies.find((p) => !p.passed)?.id ?? null;
   start(id === focusId ? null : id);
+}
+
+const READ_KEY = 'policy-prep-read';
+const readSet = () => { try { return JSON.parse(localStorage.getItem(READ_KEY)) || []; } catch { return []; } };
+const hasRead = (id) => readSet().includes(id);
+function markRead(id) {
+  const seen = readSet();
+  if (!seen.includes(id)) localStorage.setItem(READ_KEY, JSON.stringify(seen.concat(id)));
 }
 
 /* ----------------------------------------------------------------- stats */
@@ -237,7 +255,7 @@ function renderStats() {
 /* ------------------------------------------------------------------ quiz */
 
 function start(focusId = null) {
-  const built = buildSession(store, Date.now(), SESSION_SIZE, focusId);
+  const built = buildSession(store, Date.now(), CONFIG.SESSION_SIZE, focusId);
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
   keepSession();
@@ -271,6 +289,7 @@ function renderQ() {
   $('choices').innerHTML = q.choices.map((c, n) =>
     `<button class="choice" data-n="${n}">${String.fromCharCode(65 + n)}. ${esc(c)}</button>`).join('');
   [...$('choices').children].forEach((b) => { b.onclick = () => pick(Number(b.dataset.n)); });
+  speak(`${q.stem}. ${q.choices.map((c, n) => `${String.fromCharCode(65 + n)}. ${c}`).join('. ')}`);
 }
 
 function pick(n) {
@@ -296,6 +315,7 @@ function pick(n) {
   fb.innerHTML = `<b>${correct ? 'Correct.' : 'Not this time.'}</b> ${esc(q.why || '')}`
     + (q.cite ? `<div class="cite">"${esc(q.cite)}"</div>` : '');
   $('running').textContent = `${S.right} correct`;
+  speak(`${correct ? 'Correct.' : 'Not this time.'} ${q.why || ''}`);
   show('next');
   keepSession();   // saved on every answer, not just at the end
 }
@@ -326,6 +346,92 @@ function finish() {
         ? `<ul>${g.leeches.map((l) => `<li>${esc(l.label)} (missed ${l.wrong}x)</li>`).join('')}</ul>` : '');
   go('result');
   sync(true);   // push the session quietly; failure here costs nothing
+}
+
+/* -------------------------------------------------------------- settings */
+
+/* One row in the database, read by every phone, writable only by a master.
+   Applied here in one place so there is never a screen obeying an old value. */
+
+const SWITCHES = {
+  setSignup: 'allow_self_signup',
+  setPdf: 'show_pdf',
+  setRead: 'require_read_first',
+  setSpeak: 'speak_answers',
+};
+
+function settings() {
+  return store.settings || {};
+}
+
+/** Pushes saved settings into the engine and into the parts of the screen that
+    a switch is supposed to control. */
+function applySettings() {
+  const s = settings();
+  setConfig(s);
+  // A stranger creating an account gets nothing without an entitlement, but if
+  // the owner would rather they could not, the button goes.
+  $('signup').classList.toggle('hide', s.allow_self_signup === false);
+  $('readpdf').classList.toggle('hide', s.show_pdf === false);
+}
+
+/** Reads a question or a verdict out loud, when that switch is on. Uses the
+    voice already in the phone, so it costs nothing and works offline. */
+function speak(text) {
+  if (!settings().speak_answers || !('speechSynthesis' in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(text));
+    u.rate = 1;
+    speechSynthesis.speak(u);
+  } catch { /* a phone that will not speak is not a reason to stop the quiz */ }
+}
+
+function paintSettings() {
+  const s = settings();
+  $('setSize').value = s.session_size ?? 40;
+  $('setMix').value = s.mix_current ?? 80;
+  $('setPass').value = s.pass_pct ?? 90;
+  $('setGate').value = s.min_current_in_gate ?? 30;
+  $('setLeech').value = s.leech_threshold ?? 2;
+  Object.entries(SWITCHES).forEach(([id, col]) => {
+    $(id).dataset.on = String(s[col] === true);
+  });
+  $('setmsg').textContent = '';
+}
+
+async function saveSettings() {
+  const body = {
+    session_size: Number($('setSize').value),
+    mix_current: Number($('setMix').value),
+    pass_pct: Number($('setPass').value),
+    min_current_in_gate: Number($('setGate').value),
+    leech_threshold: Number($('setLeech').value),
+    updated_at: new Date().toISOString(),
+  };
+  Object.entries(SWITCHES).forEach(([id, col]) => { body[col] = $(id).dataset.on === 'true'; });
+
+  $('setsave').disabled = true;
+  $('setmsg').textContent = 'Saving...';
+  try {
+    // The database checks the limits too, so a silly number is refused there
+    // even if this screen were bypassed.
+    const rows = await db('app_settings?id=eq.true', { method: 'PATCH', body, prefer: 'return=representation' });
+    // A write that is not allowed comes back as success with nothing changed,
+    // because the row is simply invisible to that account. Silence would look
+    // like it saved, so treat an empty result as the refusal it is.
+    if (!Array.isArray(rows) || !rows.length) throw new Error('Only the master account can change these.');
+    store.settings = { ...settings(), ...rows[0] };
+    save();
+    applySettings();
+    renderHome();
+    $('setmsg').textContent = 'Saved. Every phone picks this up on its next sync.';
+  } catch (e) {
+    $('setmsg').textContent = e.message.includes('sane_') || e.message.includes('violates')
+      ? 'One of those numbers is outside what the system will accept.'
+      : e.message;
+  }
+  $('setsave').disabled = false;
 }
 
 /* ---------------------------------------------------------------- master */
@@ -487,6 +593,12 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 // Pause keeps the session on the shelf. End scores what was answered and closes it.
 $('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
 $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
+$('tosettings').onclick = () => { paintSettings(); go('settings'); };
+$('setback').onclick = () => { renderHome(); go('home'); };
+$('setsave').onclick = () => saveSettings();
+Object.keys(SWITCHES).forEach((id) => {
+  $(id).onclick = function () { this.dataset.on = this.dataset.on === 'true' ? 'false' : 'true'; };
+});
 $('resumebtn').onclick = () => resume();
 $('dropbtn').onclick = () => { store.open = null; save(); renderHome(); };
 $('home2').onclick = () => { renderHome(); go('home'); };
@@ -505,7 +617,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v11';
+export const APP_VERSION = 'v12';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
