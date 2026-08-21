@@ -1,4 +1,4 @@
-import { db, currentUserId } from './supa.js';
+import { db, dbAll, currentUserId } from './supa.js';
 
 /* Sync is one-way for content and two-way for progress.
 
@@ -17,12 +17,15 @@ export async function pullSettings(store) {
 }
 
 export async function pullContent(store) {
-  const policies = await db(
+  // Every one of these is paged: see dbAll. Questions and items are both well
+  // past the server's per-request cap, and a truncated pull is indistinguishable
+  // from a policy whose bank was never written.
+  const policies = await dbAll(
     'policies?select=id,title,sort_order,version,body_text,source_ref&order=sort_order');
   if (!policies) return false;
 
-  const items = await db('policy_items?select=policy_id,item_id,label,type,quote');
-  const questions = await db('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite');
+  const items = await dbAll('policy_items?select=policy_id,item_id,label,type,quote&order=policy_id,item_id');
+  const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite&order=policy_id,id');
 
   // Passed flags are personal, so keep whatever we already knew and let pullProgress
   // correct it. Losing them here would silently re-lock a policy already cleared.
@@ -100,9 +103,12 @@ export async function pushProgress(store) {
 }
 
 export async function pullProgress(store) {
-  const answers = await db('answers?select=policy_id,item_id,question_id,choice,correct,at&order=at');
-  const sessions = await db('sessions?select=id,policy_id,current_count,asked,correct,pct,at&order=at');
-  const states = await db('policy_state?select=policy_id,passed,passed_at');
+  // Also paged: someone working through 6603 questions passes a thousand answers
+  // in their first serious week, and a truncated history quietly rewrites their
+  // accuracy and can un-pass a policy they cleared.
+  const answers = await dbAll('answers?select=policy_id,item_id,question_id,choice,correct,at&order=at');
+  const sessions = await dbAll('sessions?select=id,policy_id,current_count,asked,correct,pct,at&order=at');
+  const states = await dbAll('policy_state?select=policy_id,passed,passed_at&order=policy_id');
   if (!answers || !sessions) return;
 
   store.progress.answers = answers.map((a) => ({

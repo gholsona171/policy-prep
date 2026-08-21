@@ -112,7 +112,7 @@ export async function policyPdfUrl(policyId) {
 }
 
 /** REST helper. `path` is everything after /rest/v1/, e.g. "questions?select=*". */
-export async function db(path, { method = 'GET', body, prefer } = {}) {
+export async function db(path, { method = 'GET', body, prefer, range } = {}) {
   const token = await fresh();
   const headers = {
     apikey: SUPABASE_ANON_KEY,
@@ -120,9 +120,35 @@ export async function db(path, { method = 'GET', body, prefer } = {}) {
     'Content-Type': 'application/json',
   };
   if (prefer) headers.Prefer = prefer;
+  if (range) headers.Range = range;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method, headers, body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
   return res.status === 204 ? null : res.json().catch(() => null);
+}
+
+/* THE API HANDS BACK 1000 ROWS AND SAYS NOTHING ABOUT THE REST.
+   Measured on 21 Aug 2026: 6603 questions in the database, exactly 1000 returned
+   for an unbounded select, no error and no warning. Everything past that cut
+   arrived with no questions attached, so roughly seven policies in eight showed
+   on the phone as "reading only" while their banks sat complete on the server.
+
+   A single request can therefore never be trusted for a table that grows. This
+   walks the pages until a short one comes back, which is the only honest end of
+   a list. PAGE stays under the server's cap on purpose: asking for more than it
+   will give just gets silently trimmed again. */
+const PAGE = 1000;
+export async function dbAll(path, { pageSize = PAGE, maxPages = 500 } = {}) {
+  const out = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const rows = await db(path, { range: `${from}-${from + pageSize - 1}` });
+    if (!Array.isArray(rows)) return page === 0 ? rows : out;
+    out.push(...rows);
+    if (rows.length < pageSize) return out;
+  }
+  // Hitting this means half a million rows in one table. Better a loud throw
+  // than quietly handing back a truncated list, which is the bug this fixes.
+  throw new Error(`${path}: more than ${maxPages * pageSize} rows, refusing to guess`);
 }

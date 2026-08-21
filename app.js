@@ -803,7 +803,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v19';
+export const APP_VERSION = 'v20';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
