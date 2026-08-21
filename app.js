@@ -5,6 +5,9 @@ import {
   signIn, signUp, signOut, signedIn, currentEmail, rpc, policyPdfUrl, db, changePassword,
 } from './supa.js';
 import { syncAll } from './sync.js';
+import {
+  readContent, writeContent, clearContent, heavyOf, lightOf, rejoin,
+} from './content-store.js';
 
 /* The local copy is the working copy: every answer is recorded here first, so a session
    in a basement with no signal behaves exactly like one on wifi. Sync then reconciles
@@ -42,7 +45,36 @@ function load() {
     return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
   } catch { return blank(); }
 }
-const save = () => localStorage.setItem(KEY, JSON.stringify(store));
+
+/* Progress goes to localStorage, content goes to IndexedDB. See content-store.js for
+   why: the two together are 7.21 MB and iOS throws past about 5 MB, which silently
+   froze this app on the last snapshot that happened to fit.
+
+   save() must never throw. It used to be the single unguarded statement between the
+   sync and the re-render, so one storage failure both lost the write AND left the
+   correct freshly pulled data unpainted. Storage is a cache of the server here;
+   failing to write it is worth reporting, never worth aborting a render for. */
+let storageWarning = null;
+
+const save = () => {
+  storageWarning = null;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(lightOf(store)));
+  } catch (e) {
+    storageWarning = `this phone refused to save your progress (${e.name || 'storage error'})`;
+  }
+  // Fire and forget: a content write is a mirror of the server and the next sync
+  // rewrites it anyway, so nothing waits on the disk to finish.
+  writeContent(heavyOf(store)).catch((e) => {
+    storageWarning = `this phone refused to save the policy content (${e.name || e.message})`;
+  });
+};
+
+/** Boot-time read of the heavy half. Separate from load() because IndexedDB is async
+    and the home screen should paint from what we already have rather than wait. */
+async function loadContent() {
+  try { rejoin(store, await readContent()); } catch { /* next sync refills it */ }
+}
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -64,7 +96,10 @@ async function sync(quiet) {
     const noQ = store.index.policies.filter((p) => !(store.banks[p.id]?.questions?.length)).length;
     $('syncmsg').textContent =
       `Up to date on ${APP_VERSION}. ${store.index.policies.length} policies, ${qTotal} questions`
-      + (noQ ? `, ${noQ} still reading only.` : '.');
+      + (noQ ? `, ${noQ} still reading only.` : '.')
+      // A failed write means this all has to be pulled again next launch. Say so:
+      // silence here is what let a full store sit unsaved for a day.
+      + (storageWarning ? ` Warning: ${storageWarning}.` : '');
   } catch (e) {
     // Offline is normal, not an error worth alarming about: everything still works.
     $('syncmsg').textContent = navigator.onLine
@@ -739,6 +774,7 @@ $('signup').onclick = () => doAuth(signUp, 'Creating account');
 $('signout').onclick = () => {
   signOut();
   localStorage.removeItem(KEY);   // a shared phone must not leave one user's history behind
+  clearContent().catch(() => {}); // and must not leave the content behind either
   store = blank();
   isMaster = false;
   $('master').classList.add('hide');
@@ -803,7 +839,15 @@ $('home2').onclick = () => { renderHome(); go('home'); };
 window.policyPrepBooted = true;
 sessionStorage.removeItem('policy-prep-recovered');
 
-if (signedIn()) { renderHome(); go('home'); checkMaster(); sync(true); } else { go('auth'); }
+if (signedIn()) {
+  go('home');
+  // Paint once from whatever is already on the device, then again once the content
+  // is back from IndexedDB, then the sync paints a third time with the server's copy.
+  renderHome();
+  loadContent().then(() => { applySettings(); renderHome(); });
+  checkMaster();
+  sync(true);
+} else { go('auth'); }
 window.addEventListener('online', () => sync(true));
 
 /* Updates.
@@ -811,7 +855,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v21';
+export const APP_VERSION = 'v22';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

@@ -1,9 +1,9 @@
 /* Offline shell. Caches only the app itself, never policy content, because policy
    content never travels over the network in the first place: it is loaded on the
    device and lives in localStorage. Bump CACHE to force an update. */
-const CACHE = 'policy-prep-v21';
+const CACHE = 'policy-prep-v22';
 const SHELL = ['./', 'index.html', 'app.js', 'engine.js', 'supa.js', 'sync.js', 'config.js',
-  'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
+  'content-store.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 /* HALF A BUILD IS WORSE THAN AN OLD ONE.
    The host serves these files with max-age=600, and app.js, sync.js and supa.js
