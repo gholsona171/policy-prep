@@ -12,7 +12,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read'];
 const go = (name) => { screens.forEach(hide); show(name); window.scrollTo(0, 0); };
 
 const blank = () => ({
@@ -119,18 +119,47 @@ function renderHome() {
         <span class="pill">${st.accuracy === null ? 'unstudied' : st.accuracy + '% overall'}</span>`}
       </div>
       <div class="meta" style="margin-top:9px">${esc(status)}</div>${leech}
-      ${p.passed ? `<div class="row" style="margin-top:12px">
-        <button class="small ghost" data-drill="${esc(p.id)}">Revise this one</button>
-      </div>` : ''}
+      ${state === 'locked' ? '' : `<div class="twoup">
+        <button class="ghost" data-read="${esc(p.id)}"${p.text ? '' : ' disabled'}>Read the policy</button>
+        <button data-test="${esc(p.id)}">${p.passed ? 'Revise this one' : 'Test this section'}</button>
+      </div>`}
     </div>`;
   }).join('') : `<div class="card"><b>Nothing to study yet.</b>
       <div class="meta" style="margin-top:6px">New policies appear here on their own.</div></div>`;
 
-  document.querySelectorAll('[data-drill]').forEach((b) => {
-    b.onclick = () => start(b.dataset.drill);
+  // Read sits beside test on purpose: the card itself says read this, then test on this.
+  document.querySelectorAll('[data-read]').forEach((b) => {
+    b.onclick = () => openReading(b.dataset.read);
+  });
+  document.querySelectorAll('[data-test]').forEach((b) => {
+    b.onclick = () => startSection(b.dataset.test);
   });
 
   $('start').disabled = !list.length;
+}
+
+/* --------------------------------------------------------------- reading */
+
+let reading = null;
+
+/** The policy on its own screen, in the department's own words. */
+function openReading(id) {
+  const p = store.index.policies.find((x) => x.id === id);
+  if (!p || !p.text) return;
+  reading = id;
+  $('readtitle').textContent = p.title;
+  $('readsource').textContent = p.source || '';
+  $('readbody').textContent = p.text;
+  $('readtest').textContent = p.passed ? 'Revise this one' : 'Take the test on this';
+  go('read');
+}
+
+/** Starting a section from its own card. The policy in focus keeps the normal
+    mix (mostly current, some review); a policy already passed is a straight
+    drill on that one. */
+function startSection(id) {
+  const focusId = store.index.policies.find((p) => !p.passed)?.id ?? null;
+  start(id === focusId ? null : id);
 }
 
 /* ----------------------------------------------------------------- stats */
@@ -394,6 +423,8 @@ $('mlistbtn').onclick = () => loadCustomers();
 $('resync').onclick = () => sync(false);
 $('tostats').onclick = () => { renderStats(); go('stats'); };
 $('statsback').onclick = () => { renderHome(); go('home'); };
+$('readback').onclick = () => { renderHome(); go('home'); };
+$('readtest').onclick = () => startSection(reading);
 $('start').onclick = () => start();
 // Deliberately follows the normal sequence rather than repeating the last focus: after
 // passing, "another session" should move you on, not park you on finished material.
@@ -410,7 +441,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v7';
+export const APP_VERSION = 'v8';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

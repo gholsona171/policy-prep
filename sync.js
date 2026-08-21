@@ -9,7 +9,8 @@ import { db, currentUserId } from './supa.js';
              history. Nothing depends on being online at the moment you answer. */
 
 export async function pullContent(store) {
-  const policies = await db('policies?select=id,title,sort_order,version&order=sort_order');
+  const policies = await db(
+    'policies?select=id,title,sort_order,version,body_text,source_ref&order=sort_order');
   if (!policies) return false;
 
   const items = await db('policy_items?select=policy_id,item_id,label,type,quote');
@@ -18,8 +19,11 @@ export async function pullContent(store) {
   // Passed flags are personal, so keep whatever we already knew and let pullProgress
   // correct it. Losing them here would silently re-lock a policy already cleared.
   const wasPassed = new Map(store.index.policies.map((p) => [p.id, p.passed]));
+  /* body_text rides along with the policy list so the reading screen works with
+     no signal, the same way the questions do. */
   store.index.policies = policies.map((p) => ({
     id: p.id, title: p.title, version: p.version, passed: wasPassed.get(p.id) ?? false,
+    text: p.body_text ?? null, source: p.source_ref ?? null,
   }));
 
   store.items = {};

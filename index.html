@@ -75,6 +75,13 @@
   .cust:last-child{border-bottom:0}
   .cust span{min-width:0;overflow-wrap:anywhere}
   a{color:var(--accent)}
+  /* The reading screen. Slightly larger and looser than the rest of the app,
+     because this is the one place a person reads for minutes rather than
+     seconds. white-space:pre-wrap keeps the policy's own line breaks. */
+  .policy{white-space:pre-wrap;font-size:15.5px;line-height:1.62;color:#dfe5ee}
+  .policy b{color:#fff}
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  .twoup button{width:100%}
 </style>
 </head>
 <body>
@@ -145,6 +152,19 @@
       <div class="meta" id="whoami"></div>
       <div class="mini" id="version"></div>
       <button id="signout" class="ghost">Sign out</button>
+    </div>
+  </div>
+
+  <!-- Reading is its own screen. The policy text is never shown during a test. -->
+  <div id="read" class="hide">
+    <h1 id="readtitle"></h1>
+    <p class="sub" id="readsource"></p>
+    <div class="card">
+      <div class="policy" id="readbody"></div>
+    </div>
+    <div class="card stack">
+      <button id="readback" class="ghost">Back</button>
+      <button id="readtest">Take the test on this</button>
     </div>
   </div>
 
