@@ -43,12 +43,14 @@ export function itemStats(progress, itemId) {
   };
 }
 
-/** Unseen first, then repeat misses, then anything still wrong, then stale. */
-function priority(s) {
-  if (s.seen === 0) return 0;
-  if (s.leech) return 1;
-  if (!s.resolved) return 2;
-  return 3;
+/** A question you have never been asked comes first, because clearing a policy
+    now requires answering every question in it. After that: repeat misses,
+    then anything still wrong, then whatever is stalest. */
+function priority(s, questionSeen) {
+  if (!questionSeen) return s.seen === 0 ? 0 : 1;
+  if (s.leech) return 2;
+  if (!s.resolved) return 3;
+  return 4;
 }
 
 function shuffle(arr, seed) {
@@ -63,9 +65,10 @@ function shuffle(arr, seed) {
 }
 
 function rank(questions, progress, seed) {
+  const asked = new Set(progress.answers.map((a) => a.questionId));
   return shuffle(questions, seed)
-    .map((q) => ({ q, s: itemStats(progress, q.itemId) }))
-    .sort((x, y) => priority(x.s) - priority(y.s) || x.s.lastAt - y.s.lastAt)
+    .map((q) => ({ q, s: itemStats(progress, q.itemId), seen: asked.has(q.id) }))
+    .sort((x, y) => priority(x.s, x.seen) - priority(y.s, y.seen) || x.s.lastAt - y.s.lastAt)
     .map((r) => r.q);
 }
 
@@ -126,8 +129,23 @@ export function requiredForGate(bank) {
   return Math.min(CONFIG.MIN_CURRENT_IN_GATE, Math.max(1, Math.ceil(size * 0.8)));
 }
 
-/** Two conditions on purpose: a percentage alone can be cleared while still carrying a
-    handful of facts you reliably get wrong, and those are what cost exam points. */
+/** How many of a policy's questions have been answered at least once. */
+export function questionCoverage(policyId, progress, bank) {
+  const all = bank?.questions ?? [];
+  const seen = new Set(progress.answers.filter((a) => a.policyId === policyId).map((a) => a.questionId));
+  const done = all.filter((q) => seen.has(q.id)).length;
+  return { total: all.length, done, complete: all.length > 0 && done === all.length };
+}
+
+/** Three conditions, and the first one is not negotiable.
+ *
+ * The whole section has to be answered. Not a qualifying sample of it, all of
+ * it: a score on thirty of fifty seven questions says nothing about the
+ * twenty seven that were never asked, and those are exactly where an exam finds
+ * you out. On top of that the best qualifying session must clear the pass mark,
+ * and nothing may still be wrong after repeated misses, because a percentage
+ * alone can be cleared while carrying a handful of facts you reliably get wrong.
+ */
 export function gate(policyId, items, progress, bank) {
   const need = requiredForGate(bank);
   const best = progress.sessions
@@ -135,15 +153,19 @@ export function gate(policyId, items, progress, bank) {
     .reduce((b, s) => (!b || s.pct > b.pct ? s : b), null);
 
   const outstanding = leeches(items, progress);
+  const cov = questionCoverage(policyId, progress, bank);
   const scoreOk = !!best && best.pct >= CONFIG.PASS_PCT;
 
   return {
-    passed: scoreOk && outstanding.length === 0,
+    passed: cov.complete && scoreOk && outstanding.length === 0,
     bestPct: best ? best.pct : null,
     scoreOk,
     need,
+    coverage: cov,
     leeches: outstanding,
-    reason: !best
+    reason: !cov.complete
+      ? `${cov.total - cov.done} of ${cov.total} questions in this policy still unanswered.`
+      : !best
       ? `No qualifying session yet (needs ${need}+ questions from this policy).`
       : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${CONFIG.PASS_PCT}%.`
       : outstanding.length ? `${outstanding.length} item(s) still wrong after ${CONFIG.LEECH_THRESHOLD}+ misses.`

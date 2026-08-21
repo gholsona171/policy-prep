@@ -127,7 +127,7 @@ function renderHome() {
       ${state === 'locked' ? '' : masteryBar(st)}
       <div class="row" style="margin-top:10px">
         <span class="pill ${c.complete ? 'ok' : 'warn'}">coverage ${c.covered}/${c.total}</span>
-        <span class="pill">${bank?.questions?.length ?? 0} questions</span>
+        <span class="pill ${g.coverage?.complete ? 'ok' : ''}">answered ${g.coverage?.done ?? 0} of ${g.coverage?.total ?? 0}</span>
         ${state === 'locked' ? '' : `
         <span class="pill">${g.bestPct === null ? 'no score yet' : 'best ' + g.bestPct + '%'}</span>
         <span class="pill">${st.accuracy === null ? 'unstudied' : st.accuracy + '% overall'}</span>`}
@@ -617,7 +617,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v12';
+export const APP_VERSION = 'v13';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
