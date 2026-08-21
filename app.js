@@ -15,10 +15,16 @@ const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
 const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings'];
+// The screen Settings was opened from, so its Back button can undo the trip.
+let cameFrom = 'home';
 const go = (name) => {
+  if (name === 'settings') cameFrom = screens.find((s) => !$(s).classList.contains('hide')) || 'home';
   screens.forEach(hide); show(name); window.scrollTo(0, 0);
-  // The corner switch is for people using the app, not for the sign-in screen.
+  // The corner controls are for people using the app, not for the sign-in screen.
   paintMic(name !== 'auth');
+  // No gear on Settings itself: a button that opens the screen you are already
+  // looking at reads as broken, and Back is right there instead.
+  $('gear').classList.toggle('hide', name === 'auth' || name === 'settings');
 };
 
 const blank = () => ({
@@ -750,8 +756,15 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 // Pause keeps the session on the shelf. End scores what was answered and closes it.
 $('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
 $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
-$('tosettings').onclick = () => { paintSettings(); go('settings'); };
-$('setback').onclick = () => { renderHome(); go('home'); };
+// The corner gear is reachable from every screen, so Back has to return to the
+// one it was opened from. Sending someone back to the home screen mid-session
+// would look exactly like their session had been thrown away.
+$('gear').onclick = () => { paintSettings(); go('settings'); };
+$('setback').onclick = () => {
+  const back = cameFrom === 'settings' ? 'home' : cameFrom;
+  if (back === 'home') renderHome();
+  go(back);
+};
 $('pwSave').onclick = () => changeMyPassword();
 $('prefSpeak').onclick = function () { setSpeak(this.dataset.on !== 'true'); };
 $('micToggle').onclick = function () { setSpeak(this.dataset.on !== 'true'); };
@@ -790,7 +803,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v18';
+export const APP_VERSION = 'v19';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

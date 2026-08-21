@@ -102,7 +102,15 @@
     border-radius:20px;padding:8px 13px;font-size:13px;font-weight:500;line-height:1;
     box-shadow:0 2px 10px rgba(0,0,0,.4)}
   .mic[data-on="true"]{color:var(--ok);border-color:#20503c}
-  /* The corner button would otherwise sit on top of the heading. */
+  /* Settings is reached from the corner, not from the bottom of the home screen.
+     Everything that used to need a scroll lives behind this one tap, master
+     actions included. Mirrors the aloud pill on the opposite corner. */
+  .gear{position:fixed;z-index:50;width:auto;
+    top:calc(8px + env(safe-area-inset-top));right:calc(10px + env(safe-area-inset-right));
+    background:var(--panel);border:1px solid var(--line);color:var(--dim);
+    border-radius:20px;padding:8px 13px;font-size:16px;font-weight:500;line-height:1;
+    box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  /* The corner buttons would otherwise sit on top of the heading. */
   body.hasmic .wrap{padding-top:calc(54px + env(safe-area-inset-top))}
 </style>
 </head>
@@ -110,6 +118,9 @@
 <!-- Hidden until someone is signed in. Off unless they turn it on: a phone that
      starts talking by itself in a briefing room is not a feature. -->
 <button id="micToggle" class="mic hide" data-on="false" aria-pressed="false">Aloud: off</button>
+<!-- The way into Settings from anywhere, including mid-session. Back returns to
+     the screen it was opened from rather than dumping you on the home screen. -->
+<button id="gear" class="gear hide" aria-label="Settings" title="Settings">&#9881;</button>
 <div class="wrap">
 
   <div id="auth" class="hide">
@@ -146,43 +157,9 @@
       <button id="resync" class="ghost">Check for new policies</button>
       <div class="meta" id="syncmsg"></div>
     </div>
-    <div id="master" class="card stack hide">
-      <div class="row" style="justify-content:space-between">
-        <b>Selling access</b><span class="pill ok">master</span>
-      </div>
-      <div class="meta" id="mastermsg">Add a paying person from wherever you are.</div>
-
-      <div id="handout" class="handout hide"></div>
-
-      <div id="mform" class="hide stack">
-        <input type="email" id="memail" placeholder="Their email" inputmode="email"
-               autocapitalize="none" autocorrect="off" spellcheck="false">
-        <div class="row">
-          <input type="text" id="mpass" placeholder="Password" style="flex:1"
-                 autocapitalize="none" autocorrect="off" spellcheck="false">
-          <button id="mroll" class="small ghost">New one</button>
-        </div>
-        <select id="mdays">
-          <option value="">Access does not expire</option>
-          <option value="30">30 days</option>
-          <option value="90">90 days</option>
-          <option value="180">6 months</option>
-          <option value="365">1 year</option>
-        </select>
-        <input type="text" id="mnote" placeholder="Who they are, what they paid">
-        <button id="mcreate">Create their account</button>
-        <button id="mcancel" class="ghost">Cancel</button>
-      </div>
-
-      <button id="mnew">Add a person</button>
-      <button id="mlistbtn" class="ghost">Who has access</button>
-      <div id="mlist"></div>
-    </div>
-
     <div class="card stack">
       <div class="meta" id="whoami"></div>
       <div class="mini" id="version"></div>
-      <button id="tosettings" class="ghost">Settings</button>
       <button id="signout" class="ghost">Sign out</button>
     </div>
   </div>
@@ -215,6 +192,43 @@
     <div id="masteronly">
     <p class="sub">Everything below is yours alone as the master account, and applies to
       everyone using the app.</p>
+
+    <!-- Selling access used to sit on the home screen, below the policy list, so
+         adding a paying person meant scrolling past everything else. It is a
+         master action, so it belongs with the other master actions, one tap from
+         the corner. -->
+    <div id="master" class="card stack hide">
+      <div class="row" style="justify-content:space-between">
+        <b>Selling access</b><span class="pill ok">master</span>
+      </div>
+      <div class="meta" id="mastermsg">Add a paying person from wherever you are.</div>
+
+      <div id="handout" class="handout hide"></div>
+
+      <div id="mform" class="hide stack">
+        <input type="email" id="memail" placeholder="Their email" inputmode="email"
+               autocapitalize="none" autocorrect="off" spellcheck="false">
+        <div class="row">
+          <input type="text" id="mpass" placeholder="Password" style="flex:1"
+                 autocapitalize="none" autocorrect="off" spellcheck="false">
+          <button id="mroll" class="small ghost">New one</button>
+        </div>
+        <select id="mdays">
+          <option value="">Access does not expire</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="180">6 months</option>
+          <option value="365">1 year</option>
+        </select>
+        <input type="text" id="mnote" placeholder="Who they are, what they paid">
+        <button id="mcreate">Create their account</button>
+        <button id="mcancel" class="ghost">Cancel</button>
+      </div>
+
+      <button id="mnew">Add a person</button>
+      <button id="mlistbtn" class="ghost">Who has access</button>
+      <div id="mlist"></div>
+    </div>
 
     <!-- The address to hand out. Nobody remembers it, and looking it up on a
          phone in front of the person you are selling to is not a good look. -->
