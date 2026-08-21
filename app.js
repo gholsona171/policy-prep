@@ -1,7 +1,7 @@
 import {
   buildSession, coverage, gate, policyStats, itemStats, SESSION_SIZE,
 } from './engine.js';
-import { signIn, signUp, signOut, signedIn, currentEmail } from './supa.js';
+import { signIn, signUp, signOut, signedIn, currentEmail, rpc } from './supa.js';
 import { syncAll } from './sync.js';
 
 /* The local copy is the working copy: every answer is recorded here first, so a session
@@ -246,6 +246,107 @@ function finish() {
   sync(true);   // push the session quietly; failure here costs nothing
 }
 
+/* ---------------------------------------------------------------- master */
+
+/* Selling access from the phone. Everything here is a call to a database function
+   that checks for itself whether the caller is a master, so hiding the card is a
+   courtesy to everyone else, not the security. */
+
+let isMaster = false;
+
+/** Said out loud down a phone line, so no l/1 and no O/0 to argue about. */
+function rollPassword() {
+  const letters = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(10));
+  let out = '';
+  for (let i = 0; i < 10; i++) {
+    const pool = i === 4 || i === 9 ? digits : letters;
+    out += pool[bytes[i] % pool.length];
+  }
+  return out[0].toUpperCase() + out.slice(1);
+}
+
+async function checkMaster() {
+  try { isMaster = await rpc('is_master') === true; } catch { isMaster = false; }
+  $('master').classList.toggle('hide', !isMaster);
+}
+
+function masterForm(open) {
+  $('mform').classList.toggle('hide', !open);
+  $('mnew').classList.toggle('hide', open);
+  $('mlistbtn').classList.toggle('hide', open);
+  if (open) {
+    $('memail').value = '';
+    $('mnote').value = '';
+    $('mdays').value = '';
+    $('mpass').value = rollPassword();
+    $('handout').classList.add('hide');
+    $('mastermsg').textContent = 'Their account is made the moment you tap create.';
+    $('memail').focus();
+  }
+}
+
+async function createCustomer() {
+  const email = $('memail').value.trim().toLowerCase();
+  const password = $('mpass').value.trim();
+  const days = $('mdays').value ? Number($('mdays').value) : null;
+  const note = $('mnote').value.trim();
+  if (!email || password.length < 8) {
+    $('mastermsg').textContent = 'Email, and a password of at least 8 characters.';
+    return;
+  }
+  $('mcreate').disabled = true;
+  $('mastermsg').textContent = 'Creating...';
+  try {
+    const r = await rpc('master_add_customer', {
+      p_email: email, p_password: password, p_days: days, p_note: note || null,
+    });
+    masterForm(false);
+    // The one thing they need is on screen in a block they can read out or copy.
+    $('handout').innerHTML = `<b>${r.created ? 'Account created' : 'Existing account, password reset'}</b>
+      ${esc(r.email)}<br>${esc(r.password)}<br>
+      <span class="meta">${r.expires_at ? 'expires ' + String(r.expires_at).slice(0, 10) : 'does not expire'}</span>`;
+    $('handout').classList.remove('hide');
+    $('mastermsg').textContent = 'Read those two lines to them. Tap them to copy.';
+    $('handout').onclick = () => {
+      navigator.clipboard?.writeText(`${r.email}\n${r.password}`)
+        .then(() => { $('mastermsg').textContent = 'Copied.'; })
+        .catch(() => {});
+    };
+    await loadCustomers();
+  } catch (e) {
+    $('mastermsg').textContent = e.message;
+  }
+  $('mcreate').disabled = false;
+}
+
+async function loadCustomers() {
+  try {
+    const rows = await rpc('master_list_customers') || [];
+    $('mlist').innerHTML = rows.length ? rows.map((r) => `<div class="cust">
+        <span>${esc(r.email)}<br><span class="mini">${r.live
+          ? (r.expires_at ? 'until ' + String(r.expires_at).slice(0, 10) : 'no expiry')
+          : 'expired'}${r.note ? ' &middot; ' + esc(r.note) : ''}</span></span>
+        <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button>
+      </div>`).join('') : '<div class="meta">Nobody has been given access yet.</div>';
+    document.querySelectorAll('[data-revoke]').forEach((b) => {
+      b.onclick = async () => {
+        if (b.dataset.armed !== '1') {
+          b.dataset.armed = '1'; b.textContent = 'Sure?';
+          setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Revoke'; }, 4000);
+          return;
+        }
+        try {
+          await rpc('master_revoke', { p_email: b.dataset.revoke });
+          $('mastermsg').textContent = `${b.dataset.revoke} can no longer see the policies.`;
+          await loadCustomers();
+        } catch (e) { $('mastermsg').textContent = e.message; }
+      };
+    });
+  } catch (e) { $('mlist').innerHTML = `<div class="meta">${esc(e.message)}</div>`; }
+}
+
 /* ------------------------------------------------------------------ auth */
 
 async function doAuth(fn, label) {
@@ -268,6 +369,7 @@ async function doAuth(fn, label) {
 async function afterSignIn() {
   renderHome();
   go('home');
+  checkMaster();
   await sync(false);
 }
 
@@ -279,8 +381,16 @@ $('signout').onclick = () => {
   signOut();
   localStorage.removeItem(KEY);   // a shared phone must not leave one user's history behind
   store = blank();
+  isMaster = false;
+  $('master').classList.add('hide');
+  masterForm(false);
   go('auth');
 };
+$('mnew').onclick = () => masterForm(true);
+$('mcancel').onclick = () => { masterForm(false); $('mastermsg').textContent = 'Add a paying person from wherever you are.'; };
+$('mroll').onclick = () => { $('mpass').value = rollPassword(); };
+$('mcreate').onclick = () => createCustomer();
+$('mlistbtn').onclick = () => loadCustomers();
 $('resync').onclick = () => sync(false);
 $('tostats').onclick = () => { renderStats(); go('stats'); };
 $('statsback').onclick = () => { renderHome(); go('home'); };
@@ -292,7 +402,7 @@ $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : render
 $('quit').onclick = () => (S.answered ? finish() : go('home'));
 $('home2').onclick = () => { renderHome(); go('home'); };
 
-if (signedIn()) { renderHome(); go('home'); sync(true); } else { go('auth'); }
+if (signedIn()) { renderHome(); go('home'); checkMaster(); sync(true); } else { go('auth'); }
 window.addEventListener('online', () => sync(true));
 
 /* Updates.
@@ -300,7 +410,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v6';
+export const APP_VERSION = 'v7';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

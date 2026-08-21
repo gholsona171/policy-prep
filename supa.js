@@ -54,6 +54,27 @@ async function fresh() {
   return d.access_token;
 }
 
+/** Calls a database function. The master tools live behind these rather than in the
+    app, because the app runs on a phone and anything it holds is readable. */
+export async function rpc(name, args = {}) {
+  const token = await fresh();
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(args),
+  });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { /* not json */ }
+  // Postgres raises are the useful message; show that, not "400".
+  if (!res.ok) throw new Error(data?.message || data?.hint || text || `${name} failed`);
+  return data;
+}
+
 /** REST helper. `path` is everything after /rest/v1/, e.g. "questions?select=*". */
 export async function db(path, { method = 'GET', body, prefer } = {}) {
   const token = await fresh();
