@@ -56,7 +56,15 @@ async function sync(quiet) {
     applySettings();
     save();
     renderHome();
-    $('syncmsg').textContent = `Up to date. ${store.index.policies.length} policy(ies).`;
+    // Says what actually arrived, not just that something did. "Up to date" while
+    // sixty five policies had no questions was a true sentence hiding a broken
+    // pull, and there is no way to inspect a phone from here.
+    const banks = Object.values(store.banks);
+    const qTotal = banks.reduce((n, b) => n + (b.questions?.length ?? 0), 0);
+    const noQ = store.index.policies.filter((p) => !(store.banks[p.id]?.questions?.length)).length;
+    $('syncmsg').textContent =
+      `Up to date on ${APP_VERSION}. ${store.index.policies.length} policies, ${qTotal} questions`
+      + (noQ ? `, ${noQ} still reading only.` : '.');
   } catch (e) {
     // Offline is normal, not an error worth alarming about: everything still works.
     $('syncmsg').textContent = navigator.onLine
@@ -803,7 +811,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v20';
+export const APP_VERSION = 'v21';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
