@@ -88,9 +88,13 @@ export function buildSession(store, seed = Date.now(), size = CONFIG.SESSION_SIZ
   // is still the default, because working one policy until it is clear is the
   // point of the system; but somebody revising one specific area for a specific
   // reason should not have to grind through everything before it.
+  // A policy with no questions yet is readable but cannot be tested, so it must
+  // never become the one in focus: if it did, it would block everything behind
+  // it forever and the course would simply stop.
+  const testable = (p) => (store.banks[p.id]?.questions?.length ?? 0) > 0;
   const current = (requested && (requested.passed || allowUnpassed) ? requested : null)
-    ?? policies.find((p) => !p.passed)
-    ?? policies[policies.length - 1];
+    ?? policies.find((p) => !p.passed && testable(p))
+    ?? policies.filter(testable).slice(-1)[0];
   if (!current) return { questions: [], currentId: null, currentCount: 0 };
 
   const passedIds = policies.filter((p) => p.passed && p.id !== current.id).map((p) => p.id);

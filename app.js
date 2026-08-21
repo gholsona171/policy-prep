@@ -105,19 +105,22 @@ function renderHome() {
 
   // The policy in focus is simply the first one not yet passed. Everything after it is
   // locked, and the card says so rather than silently offering no way in.
-  const focusId = list.find((p) => !p.passed)?.id ?? null;
+  const hasQuestions = (p) => (store.banks[p.id]?.questions?.length ?? 0) > 0;
+  const focusId = list.find((p) => !p.passed && hasQuestions(p))?.id ?? null;
 
   $('policies').innerHTML = list.length ? list.map((p) => {
     const bank = store.banks[p.id];
     const c = coverage(store.items[p.id], bank);
     const g = gate(p.id, store.items[p.id], store.progress, bank);
     const st = policyStats(p.id, store.items[p.id], bank, store.progress);
-    const state = p.passed ? 'passed'
+    const state = !hasQuestions(p) ? 'reading only'
+      : p.passed ? 'passed'
       : p.id === focusId ? 'in focus'
       : unlockedAll() ? 'open' : 'locked';
-    const status = p.passed ? 'Cleared. Still appears in review.'
-      : p.id === focusId ? g.reason
-      : state === 'open' ? g.reason
+    const status = state === 'reading only'
+        ? 'The policy is here to read. Its questions are still being written.'
+      : p.passed ? 'Cleared. Still appears in review.'
+      : p.id === focusId || state === 'open' ? g.reason
       : 'Locked until the policy above is passed.';
     const leech = g.leeches.length
       ? `<div class="keylist">${g.leeches.slice(0, 4).map((l) =>
@@ -138,10 +141,14 @@ function renderHome() {
         <span class="pill">${st.accuracy === null ? 'unstudied' : st.accuracy + '% overall'}</span>`}
       </div>
       <div class="meta" style="margin-top:9px">${esc(status)}</div>${leech}
-      ${state === 'locked' ? '' : `<div class="twoup">
-        <button class="ghost" data-read="${esc(p.id)}"${p.text ? '' : ' disabled'}>Read the policy</button>
-        <button data-test="${esc(p.id)}">${p.passed ? 'Revise this one' : 'Test this section'}</button>
-      </div>`}
+      ${state === 'locked' ? '' : state === 'reading only'
+        ? `<div style="margin-top:12px">
+            <button class="ghost" data-read="${esc(p.id)}"${p.text ? '' : ' disabled'}>Read the policy</button>
+          </div>`
+        : `<div class="twoup">
+            <button class="ghost" data-read="${esc(p.id)}"${p.text ? '' : ' disabled'}>Read the policy</button>
+            <button data-test="${esc(p.id)}">${p.passed ? 'Revise this one' : 'Test this section'}</button>
+          </div>`}
     </div>`;
   }).join('') : `<div class="card"><b>Nothing to study yet.</b>
       <div class="meta" style="margin-top:6px">New policies appear here on their own.</div></div>`;
