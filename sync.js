@@ -25,7 +25,7 @@ export async function pullContent(store) {
   if (!policies) return false;
 
   const items = await dbAll('policy_items?select=policy_id,item_id,label,type,quote&order=policy_id,item_id');
-  const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite&order=policy_id,id');
+  const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite,format,min_tier,accept&order=policy_id,id');
 
   // Passed flags are personal, so keep whatever we already knew and let pullProgress
   // correct it. Losing them here would silently re-lock a policy already cleared.
@@ -39,20 +39,31 @@ export async function pullContent(store) {
 
   store.items = {};
   store.banks = {};
+  store.practice = {};
+  const shape = (q) => ({
+    id: q.id, itemId: q.item_id, policyId: q.policy_id, stem: q.stem,
+    choices: q.choices, answer: q.answer, why: q.why, cite: q.cite,
+    format: q.format ?? 'choice', minTier: q.min_tier ?? 1, accept: q.accept ?? null,
+  });
   for (const p of policies) {
     store.items[p.id] = {
       policyId: p.id,
       items: items.filter((i) => i.policy_id === p.id)
         .map((i) => ({ id: i.item_id, label: i.label, type: i.type, quote: i.quote })),
     };
+    const mine = questions.filter((q) => q.policy_id === p.id);
+    /* THE SPLIT IS THE RULE, NOT A CONVENIENCE. store.banks is what the study
+       engine sees, and the engine is what decides a pass. Practice questions
+       (min_tier 2 and up) go in their own drawer so the completion gate can
+       never start demanding them and a session can never contain them. What a
+       tier-1 phone receives is already filtered by the server; this filter is
+       about keeping paid extras out of everyone's PASS RULES, not out of view. */
     store.banks[p.id] = {
       policyId: p.id,
-      questions: questions.filter((q) => q.policy_id === p.id)
-        .map((q) => ({
-          id: q.id, itemId: q.item_id, policyId: q.policy_id, stem: q.stem,
-          choices: q.choices, answer: q.answer, why: q.why, cite: q.cite,
-        })),
+      questions: mine.filter((q) => (q.min_tier ?? 1) <= 1).map(shape),
     };
+    const extra = mine.filter((q) => (q.min_tier ?? 1) > 1).map(shape);
+    if (extra.length) store.practice[p.id] = { policyId: p.id, questions: extra };
   }
   return true;
 }

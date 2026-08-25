@@ -17,7 +17,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice'];
 // The screen Settings was opened from, so its Back button can undo the trip.
 let cameFrom = 'home';
 const go = (name) => {
@@ -32,6 +32,7 @@ const go = (name) => {
 
 const blank = () => ({
   index: { policies: [] }, items: {}, banks: {},
+  practice: {},  // paid formats; the study engine never sees this drawer
   progress: { answers: [], sessions: [] },
   open: null,   // a session started and not yet finished
 });
@@ -220,6 +221,122 @@ function renderHome() {
   });
 
   $('start').disabled = !list.length;
+  renderPracticeCard();
+}
+
+/* -------------------------------------------------------------- practice */
+
+/* The card exists only when the pull actually delivered practice questions.
+   The server already decided that by tier, so absence IS the gate: a tier-1
+   phone has an empty drawer and simply never grows the card. Nothing here
+   checks a tier, because nothing here needs to know one exists. */
+const FORMAT_NAMES = {
+  match: 'Match word to definition',
+  term: 'Key terms',
+  blank: 'Fill in the blank',
+  scenario: 'Scenarios',
+  caselaw: 'Case law',
+};
+
+function practicePool() {
+  const byFormat = {};
+  for (const pack of Object.values(store.practice ?? {})) {
+    for (const q of pack.questions ?? []) {
+      (byFormat[q.format] = byFormat[q.format] ?? []).push(q);
+    }
+  }
+  return byFormat;
+}
+
+function renderPracticeCard() {
+  const el = $('practicecard');
+  if (!el) return;
+  const pool = practicePool();
+  const formats = Object.keys(pool);
+  if (!formats.length) { el.classList.add('hide'); el.innerHTML = ''; return; }
+  el.classList.remove('hide');
+  el.innerHTML = `<b>Practice</b>
+    <div class="meta">Extra ways to drill what you are studying. Not scored, and never
+      part of clearing a policy.</div>
+    ${formats.map((f) => `<button class="ghost" data-practice="${f}">
+      ${FORMAT_NAMES[f] ?? f} (${pool[f].length})</button>`).join('')}`;
+  el.querySelectorAll('[data-practice]').forEach((b) => {
+    b.onclick = () => startPractice(b.dataset.practice);
+  });
+}
+
+/* Typed answers are forgiving on purpose: "48", "48 hours" and "forty-eight"
+   are the same knowledge. Being marked wrong while right is how a study app
+   loses somebody, so grading strips case, punctuation and spacing, and the
+   bank lists every honest rendering. */
+/* Order matters and got it wrong once: trimming FIRST leaves the space that
+   removing a trailing "." exposes, so "2 ." failed against "2". Strip, then
+   collapse, then trim, so nothing stripped can leave whitespace behind. */
+const normalizeBlank = (t) => String(t ?? '').toLowerCase()
+  .replace(/[.,;:!?"'’$()[\]]/g, '').replace(/\s+/g, ' ').trim();
+const blankRight = (typed, accept) =>
+  (accept ?? []).some((a) => normalizeBlank(a) === normalizeBlank(typed));
+
+let P = null; // the running practice set; deliberately never persisted
+
+function startPractice(format) {
+  const pool = practicePool()[format] ?? [];
+  if (!pool.length) return;
+  P = { questions: shufflePractice(pool), i: 0, right: 0, tried: 0 };
+  go('practice');
+  renderP();
+}
+
+function shufflePractice(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function renderP() {
+  const q = P.questions[P.i];
+  $('pcounter').textContent = `Question ${P.i + 1} of ${P.questions.length}`;
+  $('ptally').textContent = P.tried ? `${P.right} of ${P.tried} right` : '';
+  $('pstem').textContent = q.stem;
+  $('pfeedback').classList.add('hide');
+  $('pnext').classList.add('hide');
+  const isBlank = q.format === 'blank';
+  $('pblankrow').classList.toggle('hide', !isBlank);
+  $('pchoices').innerHTML = '';
+  if (isBlank) {
+    $('pblank').value = '';
+    $('pblank').disabled = false;
+    $('pcheck').disabled = false;
+    $('pblank').focus();
+  } else {
+    q.choices.forEach((c, idx) => {
+      const b = document.createElement('button');
+      b.className = 'choice';
+      b.textContent = c;
+      b.onclick = () => settleP(idx === q.answer,
+        `The answer: ${q.choices[q.answer]}`, q);
+      $('pchoices').appendChild(b);
+    });
+  }
+}
+
+function settleP(right, answerLine, q) {
+  P.tried++;
+  if (right) P.right++;
+  $('ptally').textContent = `${P.right} of ${P.tried} right`;
+  const fb = $('pfeedback');
+  fb.classList.remove('hide');
+  fb.innerHTML = `<b>${right ? 'Right.' : 'Not quite.'}</b> ${esc(answerLine)}
+    ${q.why ? `<br>${esc(q.why)}` : ''}
+    ${q.cite ? `<br><span class="mini">"${esc(q.cite)}"</span>` : ''}`;
+  speak(right ? 'Right.' : 'Not quite.');
+  document.querySelectorAll('#pchoices .choice').forEach((b) => { b.disabled = true; });
+  $('pblank').disabled = true;
+  $('pcheck').disabled = true;
+  $('pnext').classList.remove('hide');
 }
 
 /* --------------------------------------------------------------- reading */
@@ -557,6 +674,27 @@ function paintSettings() {
     $(id).dataset.on = String(s[col] === true);
   });
   $('setmsg').textContent = '';
+  if (isMaster) fillTierPicker();
+}
+
+/* The tier list comes from the database so renaming a tier there renames it
+   here without a deploy. Cached per app run; two rows do not need more. */
+let tiersCache = null;
+async function tierList() {
+  if (!tiersCache) {
+    try { tiersCache = await db('tiers?select=tier,name,blurb&order=tier') || []; }
+    catch { tiersCache = []; }
+  }
+  return tiersCache;
+}
+const tierName = (t) => (tiersCache ?? []).find((r) => r.tier === t)?.name ?? `tier ${t}`;
+
+async function fillTierPicker() {
+  const rows = await tierList();
+  $('mtier').innerHTML = rows.length
+    ? rows.map((r) => `<option value="${r.tier}">${esc(r.name)}</option>`).join('')
+    : '<option value="1">Foundations</option>';
+  $('mtier').value = '1'; // new people start at the bottom unless said otherwise
 }
 
 /** Wipes this account's study history, on the server and on this phone.
@@ -693,12 +831,13 @@ async function createCustomer() {
   try {
     const r = await rpc('master_add_customer', {
       p_email: email, p_password: password, p_days: days, p_note: note || null,
+      p_tier: Number($('mtier').value) || 1,
     });
     masterForm(false);
     // The one thing they need is on screen in a block they can read out or copy.
     $('handout').innerHTML = `<b>${r.created ? 'Account created' : 'Existing account, password reset'}</b>
       ${esc(r.email)}<br>${esc(r.password)}<br>
-      <span class="meta">${r.expires_at ? 'expires ' + String(r.expires_at).slice(0, 10) : 'does not expire'}</span>`;
+      <span class="meta">${tierName(r.tier ?? 1)} &middot; ${r.expires_at ? 'expires ' + String(r.expires_at).slice(0, 10) : 'does not expire'}</span>`;
     $('handout').classList.remove('hide');
     $('mastermsg').textContent = 'Read those two lines to them. Tap them to copy.';
     $('handout').onclick = () => {
@@ -716,12 +855,44 @@ async function createCustomer() {
 async function loadCustomers() {
   try {
     const rows = await rpc('master_list_customers') || [];
+    await tierList();
+    const tiers = tiersCache ?? [];
+    const topTier = tiers.length ? Math.max(...tiers.map((t) => t.tier)) : 1;
+    // Promotion is one tap: they paid, and a misfire loses nothing. Demotion
+    // takes something away, so it arms first, exactly like Revoke.
+    const moveBtn = (r) => {
+      const t = r.tier ?? 1;
+      if (t < topTier) {
+        return `<button class="small ghost" data-tier="${t + 1}" data-temail="${esc(r.email)}">
+          Move to ${esc(tierName(t + 1))}</button>`;
+      }
+      if (t > 1) {
+        return `<button class="small ghost" data-tier="${t - 1}" data-temail="${esc(r.email)}" data-arm="1">
+          Back to ${esc(tierName(t - 1))}</button>`;
+      }
+      return '';
+    };
     $('mlist').innerHTML = rows.length ? rows.map((r) => `<div class="cust">
-        <span>${esc(r.email)}<br><span class="mini">${r.live
+        <span>${esc(r.email)}<br><span class="mini">${esc(tierName(r.tier ?? 1))} &middot; ${r.live
           ? (r.expires_at ? 'until ' + String(r.expires_at).slice(0, 10) : 'no expiry')
           : 'expired'}${r.note ? ' &middot; ' + esc(r.note) : ''}</span></span>
-        <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button>
+        <span class="row">${moveBtn(r)}
+        <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button></span>
       </div>`).join('') : '<div class="meta">Nobody has been given access yet.</div>';
+    document.querySelectorAll('[data-temail]').forEach((b) => {
+      b.onclick = async () => {
+        if (b.dataset.arm === '1' && b.dataset.armed !== '1') {
+          b.dataset.armed = '1'; b.textContent = 'Sure?';
+          setTimeout(() => { b.dataset.armed = ''; b.textContent = `Back to ${tierName(Number(b.dataset.tier))}`; }, 4000);
+          return;
+        }
+        try {
+          const r = await rpc('master_set_tier', { p_email: b.dataset.temail, p_tier: Number(b.dataset.tier) });
+          $('mastermsg').textContent = `${r.email} is now on ${tierName(r.tier)}. Their phone picks it up on its next sync.`;
+          await loadCustomers();
+        } catch (e) { $('mastermsg').textContent = e.message; }
+      };
+    });
     document.querySelectorAll('[data-revoke]').forEach((b) => {
       b.onclick = async () => {
         if (b.dataset.armed !== '1') {
@@ -795,6 +966,20 @@ $('start').onclick = () => start();
 // passing, "another session" should move you on, not park you on finished material.
 $('again').onclick = () => start();
 $('next').onclick = () => { S.i++; S.i >= S.questions.length ? finish() : renderQ(); };
+// Practice controls. Done returns home with nothing recorded, which is the point.
+$('pcheck').onclick = () => {
+  const q = P.questions[P.i];
+  settleP(blankRight($('pblank').value, q.accept),
+    `Accepted: ${(q.accept ?? []).join(', ')}`, q);
+};
+$('pblank').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !$('pcheck').disabled) $('pcheck').onclick();
+});
+$('pnext').onclick = () => {
+  P.i = (P.i + 1) % P.questions.length; // wraps: a drill has no natural end
+  renderP();
+};
+$('pdone').onclick = () => { P = null; renderHome(); go('home'); };
 // Pause keeps the session on the shelf. End scores what was answered and closes it.
 $('pause').onclick = () => { keepSession(); renderHome(); go('home'); };
 $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), renderHome(), go('home')));
@@ -853,7 +1038,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v23';
+export const APP_VERSION = 'v24';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

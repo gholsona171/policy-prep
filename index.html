@@ -151,6 +151,11 @@
     </div>
     <div id="overall"></div>
     <div id="policies"></div>
+
+    <!-- Grows in only when a sync delivers practice questions. A phone whose
+         tier does not include them never receives them, so this stays empty
+         there: the server is the gate, this is just the doorway. -->
+    <div id="practicecard" class="card stack hide"></div>
     <div class="card stack">
       <button id="start">Start a session</button>
       <button id="tostats" class="ghost">Full breakdown</button>
@@ -213,6 +218,7 @@
                  autocapitalize="none" autocorrect="off" spellcheck="false">
           <button id="mroll" class="small ghost">New one</button>
         </div>
+        <select id="mtier"></select>
         <select id="mdays">
           <option value="">Access does not expire</option>
           <option value="30">30 days</option>
@@ -332,6 +338,32 @@
     <div class="card stack">
       <button id="again">Another session</button>
       <button id="home2" class="ghost">Back</button>
+    </div>
+  </div>
+
+  <!-- Practice. Deliberately NOT the quiz screen: practice is unscored, records
+       nothing, and never touches the gate, and sharing markup with the real
+       session would make it too easy for those worlds to bleed together. -->
+  <div id="practice" class="hide">
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <span class="meta" id="pcounter"></span><span class="meta" id="ptally"></span>
+      </div>
+      <div class="meta" style="margin-top:4px">Practice is not scored.</div>
+    </div>
+    <div class="card">
+      <div class="stem" id="pstem"></div>
+      <div id="pchoices"></div>
+      <div class="row hide" id="pblankrow" style="margin-top:10px">
+        <input type="text" id="pblank" placeholder="Type the answer" style="flex:1"
+               autocapitalize="none" autocorrect="off" spellcheck="false">
+        <button id="pcheck" class="small">Check</button>
+      </div>
+      <div class="feedback hide" id="pfeedback"></div>
+    </div>
+    <div class="card stack">
+      <button id="pnext" class="hide">Next</button>
+      <button id="pdone" class="ghost">Done practicing</button>
     </div>
   </div>
 

@@ -80,7 +80,7 @@ export async function clearContent() {
 export function heavyOf(store) {
   const texts = {};
   for (const p of store.index.policies) if (p.text) texts[p.id] = p.text;
-  return { items: store.items, banks: store.banks, texts };
+  return { items: store.items, banks: store.banks, practice: store.practice ?? {}, texts };
 }
 
 export function lightOf(store) {
@@ -102,6 +102,7 @@ export function rejoin(store, heavy) {
   if (!heavy) return store;
   store.items = heavy.items ?? {};
   store.banks = heavy.banks ?? {};
+  store.practice = heavy.practice ?? {};
   const texts = heavy.texts ?? {};
   store.index.policies.forEach((p) => { p.text = texts[p.id] ?? null; });
   return store;
