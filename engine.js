@@ -59,11 +59,27 @@ function rank(questions, progress, seed) {
     .map((r) => r.q);
 }
 
-/** A session is every question in the policy, so finishing one covers the section.
-    Derived from the bank at build time, never configured: it follows the policy the
-    import produced, which is the only number that means anything here. */
-export function sessionSize(bank) {
-  return bank?.questions?.length ?? 0;
+/* Simple mode, added 25 Aug 2026 at Anton's explicit instruction, and he chose
+   it knowing it reverses the 20 Aug whole-bank rule FOR THIS MODE ONLY: with
+   simple on, a session is the section's key questions and the section can be
+   cleared on them. The key set is data (is_key, chosen at import: numbers and
+   time limits first), never a number anyone dials. With simple off, nothing
+   below behaves any differently than before.
+
+   A bank with no key questions falls back to the whole bank rather than to an
+   empty session, so old content can never brick the course. */
+export function lens(bank, simple) {
+  const qs = bank?.questions ?? [];
+  if (!simple) return qs;
+  const key = qs.filter((q) => q.key === true);
+  return key.length ? key : qs;
+}
+
+/** A session is every question in the policy (the key ones, in simple mode),
+    so finishing one covers the section. Derived from the bank at build time,
+    never configured. */
+export function sessionSize(bank, simple = false) {
+  return lens(bank, simple).length;
 }
 
 /**
@@ -75,7 +91,7 @@ export function sessionSize(bank) {
  * finished material is allowed; jumping the queue is not.
  */
 export function buildSession(store, seed = Date.now(), focusId = null,
-  { allowUnpassed = false } = {}) {
+  { allowUnpassed = false, simple = false } = {}) {
   const policies = store.index.policies;
   const requested = focusId ? policies.find((p) => p.id === focusId) : null;
   // allowUnpassed is the personal "let me pick any section" switch. The sequence
@@ -85,15 +101,15 @@ export function buildSession(store, seed = Date.now(), focusId = null,
   // A policy with no questions yet is readable but cannot be tested, so it must
   // never become the one in focus: if it did, it would block everything behind
   // it forever and the course would simply stop.
-  const testable = (p) => (store.banks[p.id]?.questions?.length ?? 0) > 0;
+  const testable = (p) => lens(store.banks[p.id], simple).length > 0;
   const current = (requested && (requested.passed || allowUnpassed) ? requested : null)
     ?? policies.find((p) => !p.passed && testable(p))
     ?? policies.filter(testable).slice(-1)[0];
   if (!current) return { questions: [], currentId: null, currentCount: 0 };
 
   const passedIds = policies.filter((p) => p.passed && p.id !== current.id).map((p) => p.id);
-  const currentPool = rank(store.banks[current.id]?.questions ?? [], store.progress, seed);
-  const reviewPool = rank(passedIds.flatMap((id) => store.banks[id]?.questions ?? []), store.progress, seed + 1);
+  const currentPool = rank(lens(store.banks[current.id], simple), store.progress, seed);
+  const reviewPool = rank(passedIds.flatMap((id) => lens(store.banks[id], simple)), store.progress, seed + 1);
 
   /* The whole current policy, then review on top in the same 80/20 proportion as
      before. Review rides on top rather than eating into the section, because taking
@@ -134,13 +150,13 @@ export function leeches(items, progress) {
  * and a sample size anyone can lower is a pass mark anyone can lower. Since a session
  * is now the whole policy, clearing one is a single honest sitting.
  */
-export function requiredForGate(bank) {
-  return Math.max(1, sessionSize(bank));
+export function requiredForGate(bank, simple = false) {
+  return Math.max(1, sessionSize(bank, simple));
 }
 
 /** How many of a policy's questions have been answered at least once. */
-export function questionCoverage(policyId, progress, bank) {
-  const all = bank?.questions ?? [];
+export function questionCoverage(policyId, progress, bank, simple = false) {
+  const all = lens(bank, simple);
   const seen = new Set(progress.answers.filter((a) => a.policyId === policyId).map((a) => a.questionId));
   const done = all.filter((q) => seen.has(q.id)).length;
   return { total: all.length, done, complete: all.length > 0 && done === all.length };
@@ -155,14 +171,14 @@ export function questionCoverage(policyId, progress, bank) {
  * and nothing may still be wrong after repeated misses, because a percentage
  * alone can be cleared while carrying a handful of facts you reliably get wrong.
  */
-export function gate(policyId, items, progress, bank) {
-  const need = requiredForGate(bank);
+export function gate(policyId, items, progress, bank, simple = false) {
+  const need = requiredForGate(bank, simple);
   const best = progress.sessions
     .filter((s) => s.currentId === policyId && s.currentCount >= need)
     .reduce((b, s) => (!b || s.pct > b.pct ? s : b), null);
 
   const outstanding = leeches(items, progress);
-  const cov = questionCoverage(policyId, progress, bank);
+  const cov = questionCoverage(policyId, progress, bank, simple);
   const scoreOk = !!best && best.pct >= CONFIG.PASS_PCT;
 
   return {

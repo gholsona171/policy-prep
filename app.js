@@ -170,7 +170,7 @@ function renderHome() {
   $('policies').innerHTML = list.length ? list.map((p) => {
     const bank = store.banks[p.id];
     const c = coverage(store.items[p.id], bank);
-    const g = gate(p.id, store.items[p.id], store.progress, bank);
+    const g = gate(p.id, store.items[p.id], store.progress, bank, simpleOn());
     const st = policyStats(p.id, store.items[p.id], bank, store.progress);
     const state = !hasQuestions(p) ? 'reading only'
       : p.passed ? 'passed'
@@ -252,8 +252,17 @@ function renderPracticeCard() {
   const el = $('practicecard');
   if (!el) return;
   const pool = practicePool();
-  const formats = Object.keys(pool);
-  if (!formats.length) { el.classList.add('hide'); el.innerHTML = ''; return; }
+  const formats = Object.keys(pool).filter(formatOn);
+  const anyAtAll = Object.keys(pool).length > 0;
+  if (!formats.length) {
+    el.classList.toggle('hide', !anyAtAll);
+    // Every format switched off is not the same as having none: say where the
+    // switches are rather than presenting an empty card or a vanished feature.
+    el.innerHTML = anyAtAll
+      ? '<b>Practice</b><div class="meta">All practice formats are switched off in Settings.</div>'
+      : '';
+    return;
+  }
   el.classList.remove('hide');
   el.innerHTML = `<b>Practice</b>
     <div class="meta">Extra ways to drill what you are studying. Not scored, and never
@@ -262,6 +271,29 @@ function renderPracticeCard() {
       ${FORMAT_NAMES[f] ?? f} (${pool[f].length})</button>`).join('')}`;
   el.querySelectorAll('[data-practice]').forEach((b) => {
     b.onclick = () => startPractice(b.dataset.practice);
+  });
+}
+
+/** One switch per practice format this person's tier actually delivers.
+    Lives under YOURS in Settings because it is a personal preference on this
+    phone, exactly like reading aloud: no master setting is consulted and no
+    other account is affected. */
+function renderFormatToggles() {
+  const el = $('prefFormats');
+  if (!el) return;
+  const formats = Object.keys(practicePool());
+  if (!formats.length) { el.classList.add('hide'); el.innerHTML = ''; return; }
+  el.classList.remove('hide');
+  el.innerHTML = `<div class="mini" style="margin-top:10px">Practice formats</div>`
+    + formats.map((f) => `<button class="toggle ghost" data-fmt="${f}"
+        data-on="${formatOn(f)}">${FORMAT_NAMES[f] ?? f}</button>`).join('');
+  el.querySelectorAll('[data-fmt]').forEach((b) => {
+    b.onclick = () => {
+      const now = b.dataset.on !== 'true';
+      b.dataset.on = String(now);
+      setFormatPref(b.dataset.fmt, now);
+      renderPracticeCard();
+    };
   });
 }
 
@@ -296,10 +328,17 @@ function shufflePractice(arr) {
   return a;
 }
 
+function policyTitle(id) {
+  return store.index.policies.find((p) => p.id === id)?.title ?? id;
+}
+
 function renderP() {
   const q = P.questions[P.i];
   $('pcounter').textContent = `Question ${P.i + 1} of ${P.questions.length}`;
   $('ptally').textContent = P.tried ? `${P.right} of ${P.tried} right` : '';
+  // Which policy this question tests, named at the top, so an answer is
+  // always read against the right document.
+  $('ppolicy').textContent = `Policy: ${policyTitle(q.policyId)}`;
   $('pstem').textContent = q.stem;
   $('pfeedback').classList.add('hide');
   $('pnext').classList.add('hide');
@@ -453,7 +492,7 @@ function renderStats() {
 function start(focusId = null, allowUnpassed = false) {
   // No size argument any more: a session is the whole policy, and the engine reads
   // that off the bank the import produced.
-  const built = buildSession(store, Date.now(), focusId, { allowUnpassed });
+  const built = buildSession(store, Date.now(), focusId, { allowUnpassed, simple: simpleOn() });
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
   keepSession();
@@ -481,6 +520,10 @@ function renderQ() {
   $('counter').textContent = `Question ${S.i + 1} of ${S.questions.length}`;
   $('running').textContent = `${S.right} correct`;
   $('prog').style.width = `${(S.i / S.questions.length) * 100}%`;
+  // The policy this question belongs to, named at the top. A session mixes
+  // review from passed policies underneath the current one, and an answer
+  // should always be read against the right document.
+  $('qpolicy').textContent = `Policy: ${policyTitle(q.policyId)}`;
   $('stem').textContent = q.stem;
   $('feedback').className = 'feedback hide';
   hide('next');
@@ -543,7 +586,7 @@ function finish() {
     asked: S.answered, right: currentRight, pct, synced: false,
   });
 
-  const g = gate(S.currentId, store.items[S.currentId], store.progress, store.banks[S.currentId]);
+  const g = gate(S.currentId, store.items[S.currentId], store.progress, store.banks[S.currentId], simpleOn());
   if (g.passed) {
     const p = store.index.policies.find((x) => x.id === S.currentId);
     if (p && !p.passed) { p.passed = true; p.passedAt = Date.now(); }
@@ -590,8 +633,8 @@ function settings() {
    account on this device. */
 const PREFS_KEY = 'policy-prep-prefs';
 function prefs() {
-  try { return { speak: null, unlockAll: false, ...JSON.parse(localStorage.getItem(PREFS_KEY)) }; }
-  catch { return { speak: null, unlockAll: false }; }
+  try { return { speak: null, unlockAll: false, formats: {}, ...JSON.parse(localStorage.getItem(PREFS_KEY)) }; }
+  catch { return { speak: null, unlockAll: false, formats: {} }; }
 }
 function setPref(key, value) {
   const p = prefs();
@@ -606,6 +649,19 @@ function setPref(key, value) {
    phone, and silence is the safe default in a room full of people. */
 const speakOn = () => prefs().speak === true;
 const unlockedAll = () => prefs().unlockAll === true;
+/* A format is ON unless this person switched it off. The switch controls what
+   THEIR practice card offers on THIS phone; the tier decides what arrives at
+   all, and no toggle can conjure content the server never sent. */
+const formatOn = (f) => prefs().formats?.[f] !== false;
+/* Simple mode: sessions are the key questions only and the section clears on
+   them. His call, made knowing it reverses the 20 Aug whole-bank rule for
+   this mode. Personal, per phone, like reading aloud. */
+const simpleOn = () => prefs().simple === true;
+function setFormatPref(f, on) {
+  const p = prefs();
+  p.formats = { ...(p.formats ?? {}), [f]: on };
+  localStorage.setItem(PREFS_KEY, JSON.stringify(p));
+}
 
 /** Applies the switches to the parts of the screen they control. Nothing here
     reaches the engine any more: the rules that decide a pass are fixed in code. */
@@ -665,6 +721,8 @@ function paintSettings() {
   $('applink').textContent = appLink();
   $('copymsg').textContent = 'Send them this, then create their account above.';
   $('prefUnlock').dataset.on = String(unlockedAll());
+  $('prefSimple').dataset.on = String(simpleOn());
+  renderFormatToggles();
   $('pwNew').value = '';
   $('pwAgain').value = '';
   $('pwMsg').textContent = '';
@@ -1001,6 +1059,12 @@ $('copylink').onclick = () => {
     .then(() => { $('copymsg').textContent = 'Copied. Paste it to them.'; })
     .catch(() => { $('copymsg').textContent = 'Could not copy. The address is above.'; });
 };
+$('prefSimple').onclick = function () {
+  const on = this.dataset.on !== 'true';
+  this.dataset.on = String(on);
+  setPref('simple', on);
+  renderHome();
+};
 $('prefUnlock').onclick = function () {
   const on = this.dataset.on !== 'true';
   this.dataset.on = String(on);
@@ -1038,7 +1102,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v24';
+export const APP_VERSION = 'v25';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

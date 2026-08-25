@@ -179,9 +179,17 @@
     <div class="card stack">
       <div class="mini">Yours</div>
       <button class="toggle ghost" id="prefSpeak" data-on="false">Read questions and answers aloud</button>
+      <button class="toggle ghost" id="prefSimple" data-on="false">Simple mode: key questions only</button>
+      <div class="meta">About ten questions per section, the ones that carry the critical
+        numbers, exceptions and terms. Clearing a section in simple mode means clearing
+        those. Switch it off any time for the full bank.</div>
       <button class="toggle ghost" id="prefUnlock" data-on="false">Let me study any section, in any order</button>
       <div class="meta">Locked order is how the course is meant to be taken: one policy
         until it is clear. Switch this on if you only want one particular area.</div>
+      <!-- Per-format practice switches. Grows in only for someone whose tier
+           delivers practice content; each switch is this person's own choice
+           on this phone, like reading aloud, never a master setting. -->
+      <div id="prefFormats" class="stack hide"></div>
     </div>
 
     <div class="card stack">
@@ -316,6 +324,7 @@
       <div class="bar"><i id="prog" style="width:0"></i></div>
     </div>
     <div class="card">
+      <div class="meta" id="qpolicy" style="margin-bottom:8px"></div>
       <div class="stem" id="stem"></div>
       <div id="choices"></div>
       <div class="feedback hide" id="feedback"></div>
@@ -352,6 +361,7 @@
       <div class="meta" style="margin-top:4px">Practice is not scored.</div>
     </div>
     <div class="card">
+      <div class="meta" id="ppolicy" style="margin-bottom:8px"></div>
       <div class="stem" id="pstem"></div>
       <div id="pchoices"></div>
       <div class="row hide" id="pblankrow" style="margin-top:10px">
