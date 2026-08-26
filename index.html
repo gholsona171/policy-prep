@@ -136,6 +136,7 @@
      the screen it was opened from rather than dumping you on the home screen. -->
 <button id="gear" class="gear hide" aria-label="Menu" title="Menu">&#9776;</button>
 <div id="menudrop" class="menudrop hide">
+  <button id="menuhome">Home</button>
   <button id="menusettings">Settings</button>
   <div class="sep"></div>
   <button id="menupractice" class="hide">Practice &amp; testing</button>
@@ -175,6 +176,7 @@
       <button id="resumebtn">Pick up where you left off</button>
       <button id="dropbtn" class="ghost">Throw it away and start fresh</button>
     </div>
+    <div id="leaderboard"></div>
     <div id="overall"></div>
     <div id="policies"></div>
 
@@ -207,6 +209,12 @@
       <div class="meta">About ten questions per section, the ones that carry the critical
         numbers, exceptions and terms. Clearing a section in simple mode means clearing
         those. Switch it off any time for the full bank.</div>
+      <button class="toggle ghost" id="prefBoard" data-on="true">Show the leaderboard</button>
+      <div class="row">
+        <input type="text" id="prefName" placeholder="Name on the leaderboard" maxlength="24" style="flex:1">
+        <button id="prefNameSave" class="small ghost">Save</button>
+      </div>
+      <div class="meta" id="prefNameMsg">Without a name you appear as Officer plus four letters.</div>
       <label class="meta" for="prefPass">My pass mark (percent)</label>
       <input type="number" id="prefPass" min="50" max="100" inputmode="numeric">
       <div class="meta">The score a sitting needs before a section can clear, for you

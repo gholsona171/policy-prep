@@ -89,6 +89,7 @@ export function lightOf(store) {
       policies: store.index.policies.map((p) => ({
         id: p.id, title: p.title, version: p.version, passed: p.passed,
         passedAt: p.passedAt, passedPct: p.passedPct, passedMark: p.passedMark,
+        passedSimple: p.passedSimple,
         source: p.source,
       })),
     },

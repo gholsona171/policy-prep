@@ -111,6 +111,7 @@ export async function pushProgress(store) {
         user_id: uid, policy_id: p.id, passed: true,
         passed_at: new Date(p.passedAt ?? Date.now()).toISOString(),
         pass_pct: p.passedPct ?? null, pass_mark: p.passedMark ?? null,
+        pass_simple: p.passedSimple === true,
       })),
     });
   }
@@ -122,7 +123,7 @@ export async function pullProgress(store) {
   // accuracy and can un-pass a policy they cleared.
   const answers = await dbAll('answers?select=policy_id,item_id,question_id,choice,correct,at&order=at');
   const sessions = await dbAll('sessions?select=id,policy_id,current_count,asked,correct,pct,at&order=at');
-  const states = await dbAll('policy_state?select=policy_id,passed,passed_at,pass_pct,pass_mark&order=policy_id');
+  const states = await dbAll('policy_state?select=policy_id,passed,passed_at,pass_pct,pass_mark,pass_simple&order=policy_id');
   if (!answers || !sessions) return;
 
   store.progress.answers = answers.map((a) => ({
@@ -143,6 +144,7 @@ export async function pullProgress(store) {
     p.passed = !!st;
     p.passedPct = st?.pass_pct ?? p.passedPct ?? null;
     p.passedMark = st?.pass_mark ?? p.passedMark ?? null;
+    p.passedSimple = st?.pass_simple ?? p.passedSimple ?? false;
   });
 }
 

@@ -28,7 +28,7 @@ const go = (name) => {
   paintMic(name !== 'auth');
   // No gear on Settings itself: a button that opens the screen you are already
   // looking at reads as broken, and Back is right there instead.
-  $('gear').classList.toggle('hide', name === 'auth' || name === 'settings');
+  $('gear').classList.toggle('hide', name === 'auth');
   $('menudrop').classList.add('hide');
 };
 
@@ -94,6 +94,9 @@ async function sync(quiet) {
     await syncAll(store);
     applySettings();
     obeyMinBuild();
+    if (leaderboardOn()) {
+      try { store.leaderboard = await rpc('leaderboard'); } catch { /* board is a nicety */ }
+    }
     save();
     await saveContent();
     renderHome();
@@ -133,6 +136,18 @@ function masteryBar(st) {
   </div>`;
 }
 
+/** The best pass anyone holds on one section, full and simple kept apart:
+    ten key questions and the whole bank are different mountains. */
+function sectionBest(policyId) {
+  if (!leaderboardOn()) return '';
+  const rows = (store.leaderboard?.sections ?? []).filter((x) => x.policy_id === policyId);
+  if (!rows.length) return '';
+  const bit = (x) => `${x.simple ? 'simple' : 'best'} ${x.best}% ${esc(x.name)}`;
+  const full = rows.find((x) => !x.simple);
+  const simple = rows.find((x) => x.simple);
+  return `<span class="mini">${[full, simple].filter(Boolean).map(bit).join(' &middot; ')}</span>`;
+}
+
 function renderHome() {
   const list = store.index.policies;
 
@@ -152,6 +167,16 @@ function renderHome() {
   $('homesub').textContent = list.length
     ? 'One policy at a time. 90 percent and no repeat misses to move on.'
     : 'No policies published yet.';
+
+  // The leaderboard, at the very top, when it is on and has anything to say.
+  const lb = store.leaderboard;
+  $('leaderboard').innerHTML = (leaderboardOn() && lb?.overall?.length) ? `<div class="card stack">
+    <div class="mini">Leaderboard</div>
+    ${lb.overall.slice(0, 5).map((r, i) => `<div class="row" style="justify-content:space-between${r.me ? ';font-weight:700' : ''}">
+      <span>${i + 1}. ${esc(r.name)}${r.me ? ' (you)' : ''}</span>
+      <span class="mini">${r.full_passed} full &middot; ${r.simple_passed} simple${r.avg_pct != null ? ` &middot; avg ${r.avg_pct}%` : ''}</span>
+    </div>`).join('')}
+  </div>` : '';
 
   // Overall band across every policy, so the top of the screen answers "how am I doing"
   // before any per-policy detail.
@@ -193,6 +218,7 @@ function renderHome() {
     return `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b${state === 'locked' ? ' style="color:#6b7480"' : ''}>${esc(p.title)}</b>
+        ${sectionBest(p.id)}
         <span class="pill ${state === 'passed' ? 'ok' : state === 'in focus' ? 'warn' : ''}">${state}${
           state === 'passed' && p.passedPct != null
             ? ` · ${p.passedPct}%${p.passedMark != null && p.passedMark !== 90 ? ` (mark ${p.passedMark})` : ''}` : ''}</span>
@@ -761,6 +787,7 @@ function finish() {
       // what standard is a dashboard that can lie to you later.
       p.passedPct = g.bestPct;
       p.passedMark = g.mark;
+      p.passedSimple = simpleOn();
     }
   }
   save();
@@ -842,6 +869,8 @@ const formatOn = (f) => prefs().formats?.[f] !== false;
    them. His call, made knowing it reverses the 20 Aug whole-bank rule for
    this mode. Personal, per phone, like reading aloud. */
 const simpleOn = () => prefs().simple === true;
+// ON unless deliberately switched off - Anton's default for the leaderboard.
+const leaderboardOn = () => prefs().leaderboard !== false;
 /* The pass mark: this person's own, default 90. Clamped 50-100, so a typo can
    neither make sections free nor make them impossible. */
 const passMark = () => {
@@ -931,6 +960,7 @@ function paintSettings() {
   $('prefUnlock').dataset.on = String(unlockedAll());
   $('prefSimple').dataset.on = String(simpleOn());
   $('prefPass').value = passMark();
+  $('prefBoard').dataset.on = String(leaderboardOn());
   renderFormatToggles();
   $('pwNew').value = '';
   $('pwAgain').value = '';
@@ -1272,6 +1302,7 @@ const menuOpen = (on) => {
   if (on) $('menupractice').classList.toggle('hide', !tier2Here());
   $('menudrop').classList.toggle('hide', !on);
 };
+$('menuhome').onclick = () => { menuOpen(false); renderHome(); go('home'); };
 $('menusettings').onclick = () => { menuOpen(false); paintSettings(); go('settings'); };
 $('sugloadbtn').onclick = async () => {
   try {
@@ -1415,6 +1446,21 @@ $('prefSimple').onclick = function () {
   setPref('simple', on);
   renderHome();
 };
+$('prefBoard').onclick = function () {
+  const on = this.dataset.on !== 'true';
+  this.dataset.on = String(on);
+  setPref('leaderboard', on);
+  renderHome();
+};
+$('prefNameSave').onclick = async () => {
+  const name = $('prefName').value.trim();
+  if (!name) return;
+  try {
+    const r = await rpc('set_display_name', { p_name: name });
+    $('prefNameMsg').textContent = `You appear as ${r.name}.`;
+    try { store.leaderboard = await rpc('leaderboard'); renderHome(); } catch { /* next sync */ }
+  } catch (e) { $('prefNameMsg').textContent = e.message; }
+};
 $('prefPass').onchange = function () {
   const n = Math.min(100, Math.max(50, Number(this.value) || 90));
   this.value = n;
@@ -1481,7 +1527,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 34;
+export const BUILD = 35;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
