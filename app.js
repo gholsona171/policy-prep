@@ -3,6 +3,7 @@ import {
 } from './engine.js';
 import {
   signIn, signUp, signOut, signedIn, currentEmail, rpc, policyPdfUrl, db, changePassword,
+  deviceId, deviceLabel,
 } from './supa.js';
 import { syncAll } from './sync.js';
 import {
@@ -1122,8 +1123,11 @@ async function loadCustomers() {
     $('mlist').innerHTML = rows.length ? rows.map((r) => `<div class="cust">
         <span>${esc(r.email)}<br><span class="mini">${esc(tierName(r.tier ?? 1))} &middot; ${r.live
           ? (r.expires_at ? 'until ' + String(r.expires_at).slice(0, 10) : 'no expiry')
-          : 'expired'}${r.note ? ' &middot; ' + esc(r.note) : ''}</span></span>
-        <span class="row">${moveBtn(r)}
+          : 'expired'}${r.note ? ' &middot; ' + esc(r.note) : ''}${r.device_label
+          ? ` &middot; on ${esc(r.device_label)} since ${String(r.device_claimed).slice(0, 10)}`
+          : ' &middot; no device yet'}</span></span>
+        <span class="row">${moveBtn(r)}${r.device_label
+          ? `<button class="small ghost" data-release="${esc(r.email)}">Release device</button>` : ''}
         <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button></span>
       </div>`).join('') : '<div class="meta">Nobody has been given access yet.</div>';
     document.querySelectorAll('[data-temail]').forEach((b) => {
@@ -1136,6 +1140,20 @@ async function loadCustomers() {
         try {
           const r = await rpc('master_set_tier', { p_email: b.dataset.temail, p_tier: Number(b.dataset.tier) });
           $('mastermsg').textContent = `${r.email} is now on ${tierName(r.tier)}. Their phone picks it up on its next sync.`;
+          await loadCustomers();
+        } catch (e) { $('mastermsg').textContent = e.message; }
+      };
+    });
+    document.querySelectorAll('[data-release]').forEach((b) => {
+      b.onclick = async () => {
+        if (b.dataset.armed !== '1') {
+          b.dataset.armed = '1'; b.textContent = 'Sure?';
+          setTimeout(() => { b.dataset.armed = ''; b.textContent = 'Release device'; }, 4000);
+          return;
+        }
+        try {
+          await rpc('master_release_device', { p_email: b.dataset.release });
+          $('mastermsg').textContent = `${b.dataset.release} can now sign in on a new device. The first one in takes the slot.`;
           await loadCustomers();
         } catch (e) { $('mastermsg').textContent = e.message; }
       };
@@ -1172,8 +1190,33 @@ async function doAuth(fn, label) {
       $('authmsg').textContent = 'Account created. Check your email to confirm, then sign in.';
       return;
     }
+    if (!(await claimThisDevice())) return;
     await afterSignIn();
   } catch (e) { $('authmsg').textContent = e.message; }
+}
+
+/* The device lock, client side. The server refuses content to any device but
+   the registered one regardless of what this code does - this function exists
+   to say WHY the screen would otherwise just be empty. First device claims;
+   a different device is signed straight back out with a plain sentence. */
+async function claimThisDevice() {
+  try {
+    const r = await rpc('claim_device', { p_device_id: deviceId(), p_label: deviceLabel() });
+    if (r?.ok) return true;
+    signOut();
+    localStorage.removeItem(KEY);
+    clearContent().catch(() => {});
+    store = blank();
+    go('auth');
+    $('authmsg').textContent = 'This account is locked to '
+      + (r?.holder ? `another device (${r.holder})` : 'another device')
+      + '. Ask the person who sold you access to release it, then sign in again.';
+    return false;
+  } catch {
+    // Offline at boot: the server will still refuse content if this device
+    // lost the slot, so failing open here costs nothing.
+    return true;
+  }
 }
 
 async function afterSignIn() {
@@ -1282,6 +1325,7 @@ window.policyPrepBooted = true;
 sessionStorage.removeItem('policy-prep-recovered');
 
 if (signedIn()) {
+  claimThisDevice();   // no await: the server enforces regardless; this just explains
   go('home');
   // Paint once from whatever is already on the device, then again once the content
   // is back from IndexedDB, then the sync paints a third time with the server's copy.
@@ -1297,7 +1341,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v28';
+export const APP_VERSION = 'v29';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

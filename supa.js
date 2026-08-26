@@ -5,6 +5,35 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config.js';
    the app has no CDN dependency to fail on a bad signal. */
 
 const SESSION_KEY = 'policy-prep-session';
+const DEVICE_KEY = 'policy-prep-device';
+
+/* This phone's identity, minted once on first run. The server compares it to
+   the registered slot on every content read: an account is locked to the first
+   device that signed in, and only the master can release it. The id proves
+   nothing by itself - it is the comparison server-side that carries the weight,
+   which is why a copied id in a different browser profile still needs the slot. */
+export function deviceId() {
+  let id = null;
+  try { id = localStorage.getItem(DEVICE_KEY); } catch { /* fall through */ }
+  if (!id) {
+    id = (crypto.randomUUID ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`);
+    try { localStorage.setItem(DEVICE_KEY, id); } catch { /* memory-only session */ }
+  }
+  return id;
+}
+
+/** A short human name for this device, shown to the master when a customer
+    calls about a locked slot. Best effort; "a phone" is an honest fallback. */
+export function deviceLabel() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Windows/.test(ua)) return 'Windows browser';
+  if (/Macintosh/.test(ua)) return 'Mac browser';
+  return 'a device';
+}
 
 export function session() {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return null; }
@@ -82,6 +111,7 @@ export async function rpc(name, args = {}) {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'x-device-id': deviceId(),
     },
     body: JSON.stringify(args),
   });
@@ -118,6 +148,7 @@ export async function db(path, { method = 'GET', body, prefer, range } = {}) {
     apikey: SUPABASE_ANON_KEY,
     Authorization: `Bearer ${token}`,
     'Content-Type': 'application/json',
+    'x-device-id': deviceId(),
   };
   if (prefer) headers.Prefer = prefer;
   if (range) headers.Range = range;
