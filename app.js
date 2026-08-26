@@ -93,6 +93,7 @@ async function sync(quiet) {
   try {
     await syncAll(store);
     applySettings();
+    obeyMinBuild();
     save();
     await saveContent();
     renderHome();
@@ -853,6 +854,23 @@ function setFormatPref(f, on) {
   localStorage.setItem(PREFS_KEY, JSON.stringify(p));
 }
 
+/* The master's update push. min_build rides the settings row every phone pulls
+   on every sync; a phone below the floor reloads itself into the newest build
+   right now, instead of waiting for the close-and-reopen-twice ritual. The
+   worker fetches network-first with the HTTP cache bypassed, so one reload IS
+   the newest build. The sessionStorage guard stops a loop if a phone somehow
+   cannot get above the floor: it reloads once per app-open, not forever. */
+function obeyMinBuild() {
+  const floor = Number(store.settings?.min_build) || 0;
+  if (floor <= BUILD || !navigator.onLine) return;
+  try {
+    if (sessionStorage.getItem('policy-prep-forced') === String(floor)) return;
+    sessionStorage.setItem('policy-prep-forced', String(floor));
+  } catch { return; }
+  navigator.serviceWorker?.getRegistration?.().then((r) => r?.update()).catch(() => {});
+  location.reload();
+}
+
 /** Applies the switches to the parts of the screen they control. Nothing here
     reaches the engine any more: the rules that decide a pass are fixed in code. */
 function applySettings() {
@@ -1255,6 +1273,23 @@ const menuOpen = (on) => {
   $('menudrop').classList.toggle('hide', !on);
 };
 $('menusettings').onclick = () => { menuOpen(false); paintSettings(); go('settings'); };
+$('pushbuild').onclick = async () => {
+  $('pushbuild').disabled = true;
+  $('pushmsg').textContent = 'Setting the floor...';
+  try {
+    // Same guarded write as the switches: a forbidden write comes back empty,
+    // and empty is a refusal, not a success.
+    const rows = await db('app_settings?id=eq.true', {
+      method: 'PATCH', prefer: 'return=representation',
+      body: { min_build: BUILD, updated_at: new Date().toISOString() },
+    });
+    if (!Array.isArray(rows) || !rows.length) throw new Error('Only the master account can push updates.');
+    store.settings = { ...settings(), ...rows[0] };
+    save();
+    $('pushmsg').textContent = `Done. Every phone below build ${BUILD} reloads itself on its next open or sync.`;
+  } catch (e) { $('pushmsg').textContent = e.message; }
+  $('pushbuild').disabled = false;
+};
 $('menupractice').onclick = () => {
   menuOpen(false);
   renderPracticeCard();
@@ -1367,7 +1402,8 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const APP_VERSION = 'beta 32';
+export const BUILD = 33;
+export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
