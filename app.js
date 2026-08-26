@@ -18,7 +18,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras'];
 // The screen Settings was opened from, so its Back button can undo the trip.
 let cameFrom = 'home';
 const go = (name) => {
@@ -1250,9 +1250,19 @@ $('mlistbtn').onclick = () => loadCustomers();
 /* The three-line menu. One corner, one tap, everything that used to live at
    the bottom of a long scroll: Settings first because it is why the menu
    exists, then the occasional actions, then the way out. */
-const menuOpen = (on) => $('menudrop').classList.toggle('hide', !on);
+const menuOpen = (on) => {
+  if (on) $('menupractice').classList.toggle('hide', !tier2Here());
+  $('menudrop').classList.toggle('hide', !on);
+};
 $('menusettings').onclick = () => { menuOpen(false); paintSettings(); go('settings'); };
+$('menupractice').onclick = () => {
+  menuOpen(false);
+  renderPracticeCard();
+  renderTestingCard();
+  go('extras');
+};
 $('menustats').onclick = () => { menuOpen(false); renderStats(); go('stats'); };
+$('extrasback').onclick = () => { renderHome(); go('home'); };
 $('menuresync').onclick = () => { menuOpen(false); sync(false); };
 // A tap anywhere else closes it, the way small menus are expected to behave.
 document.addEventListener('click', (e) => {
@@ -1353,7 +1363,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v30';
+export const APP_VERSION = 'v31';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

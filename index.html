@@ -117,6 +117,9 @@
     right:calc(10px + env(safe-area-inset-right));min-width:220px;
     background:var(--panel);border:1px solid var(--line);border-radius:12px;
     box-shadow:0 6px 24px rgba(0,0,0,.5);padding:6px;display:flex;flex-direction:column}
+  /* display:flex above would otherwise beat .hide's display:none - same
+     specificity, later in the sheet - which left the menu permanently open. */
+  .menudrop.hide{display:none}
   .menudrop button{background:none;border:none;color:var(--fg);text-align:left;
     padding:12px 14px;font-size:15px;border-radius:8px;width:100%}
   .menudrop button:active{background:var(--line)}
@@ -135,6 +138,7 @@
 <div id="menudrop" class="menudrop hide">
   <button id="menusettings">Settings</button>
   <div class="sep"></div>
+  <button id="menupractice" class="hide">Practice &amp; testing</button>
   <button id="menustats">Full breakdown</button>
   <button id="menuresync">Check for new policies</button>
   <div class="sep"></div>
@@ -174,8 +178,7 @@
     <!-- Grows in only when a sync delivers practice questions. A phone whose
          tier does not include them never receives them, so this stays empty
          there: the server is the gate, this is just the doorway. -->
-    <div id="practicecard" class="card stack hide"></div>
-    <div id="testingcard" class="card stack hide"></div>
+
     <div class="card stack">
       <button id="start">Start a session</button>
 
@@ -328,6 +331,15 @@
       <button id="readtest">Take the test on this</button>
       <button id="readback" class="ghost">Back</button>
     </div>
+  </div>
+
+  <div id="extras" class="hide">
+    <h1>Practice &amp; testing</h1>
+    <p class="sub">Extra ways to drill. Nothing here clears a section; that still takes
+      a full sitting.</p>
+    <div id="practicecard" class="card stack hide"></div>
+    <div id="testingcard" class="card stack hide"></div>
+    <button id="extrasback" class="ghost">Back</button>
   </div>
 
   <div id="stats" class="hide">
