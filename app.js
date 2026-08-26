@@ -138,7 +138,8 @@ function renderHome() {
   const open = store.open;
   $('resume').classList.toggle('hide', !open);
   if (open) {
-    const title = list.find((p) => p.id === open.currentId)?.title ?? 'a policy';
+    const title = open.drill ? `the ${open.drill}`
+      : list.find((p) => p.id === open.currentId)?.title ?? 'a policy';
     const when = new Date(open.savedAt || Date.now());
     $('resumeline').textContent =
       `${open.answered} of ${open.questions.length} answered on ${title}, `
@@ -224,6 +225,7 @@ function renderHome() {
 
   $('start').disabled = !list.length;
   renderPracticeCard();
+  renderTestingCard();
 }
 
 /* -------------------------------------------------------------- practice */
@@ -274,6 +276,130 @@ function renderPracticeCard() {
   el.querySelectorAll('[data-practice]').forEach((b) => {
     b.onclick = () => startPractice(b.dataset.practice);
   });
+}
+
+/* ---------------------------------------------------------------- drills
+   Three testing areas, tier 2, added 26 Aug 2026 at Anton's instruction.
+   They reuse the quiz screen, so every answer lands in the same history as a
+   real sitting - his ruling: "they affect your overall score". What they never
+   do is record a SESSION, so no drill can produce the qualifying sitting the
+   gate demands, and the one-policy-at-a-time course is untouched.
+
+   All three draw core questions only (the four-option material the exam is
+   made of; typed-answer practice has its own screen), through the same
+   simple-mode lens as everything else. */
+
+/* Tier-2 content arrives only for a tier-2 account, and it arrives into the
+   practice drawer - so the drawer having anything in it IS the tier check,
+   the same one the Practice card already relies on. */
+const tier2Here = () => Object.keys(practicePool()).length > 0;
+
+const drillPool = (ids = null) => {
+  const out = [];
+  for (const p of store.index.policies) {
+    if (ids && !ids.includes(p.id)) continue;
+    for (const q of lensed(store.banks[p.id])) {
+      if ((q.minTier ?? 1) <= 1 && Array.isArray(q.choices) && q.choices.length === 4) out.push(q);
+    }
+  }
+  return out;
+};
+
+const lensed = (bank) => {
+  const qs = bank?.questions ?? [];
+  if (!simpleOn()) return qs;
+  const key = qs.filter((q) => q.key === true);
+  return key.length ? key : qs;
+};
+
+/** Questions this person has answered wrong two or more times, lifetime. */
+function weakQuestions() {
+  const wrongs = new Map();
+  for (const a of store.progress.answers) {
+    if (!a.correct) wrongs.set(a.questionId, (wrongs.get(a.questionId) ?? 0) + 1);
+  }
+  return drillPool().filter((q) => (wrongs.get(q.id) ?? 0) >= 2);
+}
+
+function startDrill(questions, label) {
+  if (!questions.length) return;
+  const shuffledQ = questions.slice();
+  for (let i = shuffledQ.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledQ[i], shuffledQ[j]] = [shuffledQ[j], shuffledQ[i]];
+  }
+  S = { questions: shuffledQ, currentId: null, currentCount: 0, i: 0, right: 0, answered: 0,
+        drill: label };
+  keepSession();
+  go('quiz');
+  renderQ();
+}
+
+function renderTestingCard() {
+  const el = $('testingcard');
+  if (!el) return;
+  if (!tier2Here()) { el.classList.add('hide'); el.innerHTML = ''; return; }
+  el.classList.remove('hide');
+  const weak = weakQuestions();
+  const weakReady = weak.length >= 10;
+  el.innerHTML = `<b>Testing area</b>
+    <div class="meta">Real questions, recorded like any other answer. No test here can
+      clear a section: that still takes a full sitting.</div>
+    <button class="ghost" id="drillmock">Practice exam: 100 at random</button>
+    <button class="ghost" id="drillweak" ${weakReady ? '' : 'disabled'}>
+      Weak spots (${weak.length})</button>
+    ${weakReady ? '' : `<div class="mini">Opens at 10 questions missed twice; you have ${weak.length}.</div>`}
+    <button class="ghost" id="drillpick">Build your own test</button>
+    <div id="drillpicker" class="hide stack"></div>`;
+  $('drillmock').onclick = () => {
+    const pool = drillPool();
+    startDrill(pool.slice(0, 100).length === pool.length ? pool : shufflePick(pool, 100), 'practice exam');
+  };
+  $('drillweak').onclick = () => { if (weakReady) startDrill(weak, 'weak spots'); };
+  $('drillpick').onclick = () => renderDrillPicker();
+}
+
+/** A fresh random 100, drawn again on every open. */
+function shufflePick(pool, n) {
+  const a = pool.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+function renderDrillPicker() {
+  const el = $('drillpicker');
+  el.classList.toggle('hide');
+  if (el.classList.contains('hide')) { el.innerHTML = ''; return; }
+  // Locked policies appear only for someone who has switched on the personal
+  // any-order setting: pooling locked material is exactly what that switch is for.
+  const jump = unlockedAll();
+  const firstUnpassed = store.index.policies.find((p) => !p.passed)?.id;
+  const offerable = store.index.policies.filter((p) => {
+    if (!lensed(store.banks[p.id]).length) return false;
+    if (jump) return true;
+    return p.passed || p.id === firstUnpassed;
+  });
+  el.innerHTML = `<div class="mini" style="margin-top:8px">Pick the sections to pool</div>`
+    + (jump ? '' : `<div class="mini">Locked sections appear here once "study any section,
+        in any order" is switched on in Settings.</div>`)
+    + offerable.map((p) => `<button class="toggle ghost" data-pool="${p.id}" data-on="false">
+        ${esc(p.title)}</button>`).join('')
+    + `<button id="drillgo" disabled>Start the test</button>`;
+  const chosen = new Set();
+  el.querySelectorAll('[data-pool]').forEach((b) => {
+    b.onclick = () => {
+      const on = b.dataset.on !== 'true';
+      b.dataset.on = String(on);
+      on ? chosen.add(b.dataset.pool) : chosen.delete(b.dataset.pool);
+      $('drillgo').disabled = !chosen.size;
+    };
+  });
+  $('drillgo').onclick = () => {
+    if (chosen.size) startDrill(drillPool([...chosen]), 'your own test');
+  };
 }
 
 /** One switch per practice format this person's tier actually delivers.
@@ -582,6 +708,21 @@ function pick(n) {
 }
 
 function finish() {
+  /* A drill ends with a score and nothing else: no session row, no gate, no
+     popup. The answers were already recorded one by one, which is all "affect
+     your overall score" requires; a session row is what the gate reads, and no
+     drill may ever produce one. */
+  if (S.drill) {
+    const pct = S.answered ? Math.round((S.right / S.answered) * 100) : 0;
+    store.open = null;
+    save();
+    $('score').textContent = `${pct}%`;
+    $('scoreline').textContent = `${S.right} of ${S.answered} on the ${S.drill}`;
+    $('gatebox').innerHTML = '<span class="pill">testing only - sections clear in a full sitting</span>';
+    go('result');
+    renderHome();
+    return;
+  }
   /* Score the policy being gated, on the questions actually answered.
      Two faults lived here and both let a policy be cleared without earning it.
      currentCount used to be the number of current-policy questions the session
@@ -1156,7 +1297,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v27';
+export const APP_VERSION = 'v28';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
