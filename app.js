@@ -319,13 +319,28 @@ function startPractice(format) {
   renderP();
 }
 
+/* A chained scenario is one incident told across two or three questions, and
+   the parts only make sense in order: part 2 begins where part 1's answer left
+   you. So chains ride the shuffle as one block - the ORDER OF STORIES is
+   random, the order INSIDE a story never is. Everything unchained shuffles
+   exactly as before. */
 function shufflePractice(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+  const groups = [];
+  const byChain = new Map();
+  for (const q of arr) {
+    if (q.chain) {
+      if (!byChain.has(q.chain)) { byChain.set(q.chain, []); groups.push(byChain.get(q.chain)); }
+      byChain.get(q.chain).push(q);
+    } else {
+      groups.push([q]);
+    }
   }
-  return a;
+  byChain.forEach((g) => g.sort((a, b) => (a.part ?? 0) - (b.part ?? 0)));
+  for (let i = groups.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [groups[i], groups[j]] = [groups[j], groups[i]];
+  }
+  return groups.flat();
 }
 
 function policyTitle(id) {
@@ -337,8 +352,11 @@ function renderP() {
   $('pcounter').textContent = `Question ${P.i + 1} of ${P.questions.length}`;
   $('ptally').textContent = P.tried ? `${P.right} of ${P.tried} right` : '';
   // Which policy this question tests, named at the top, so an answer is
-  // always read against the right document.
-  $('ppolicy').textContent = `Policy: ${policyTitle(q.policyId)}`;
+  // always read against the right document; and its place in the story when
+  // it is part of a chained scenario.
+  const chainLen = q.chain ? P.questions.filter((x) => x.chain === q.chain).length : 0;
+  $('ppolicy').textContent = `Policy: ${policyTitle(q.policyId)}`
+    + (q.chain ? ` — Part ${q.part} of ${chainLen}` : '');
   $('pstem').textContent = q.stem;
   $('pfeedback').classList.add('hide');
   $('pnext').classList.add('hide');
@@ -1102,7 +1120,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v25';
+export const APP_VERSION = 'v26';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

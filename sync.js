@@ -25,7 +25,7 @@ export async function pullContent(store) {
   if (!policies) return false;
 
   const items = await dbAll('policy_items?select=policy_id,item_id,label,type,quote&order=policy_id,item_id');
-  const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite,format,min_tier,accept,is_key&order=policy_id,id');
+  const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite,format,min_tier,accept,is_key,chain_id,chain_part&order=policy_id,id');
 
   // Passed flags are personal, so keep whatever we already knew and let pullProgress
   // correct it. Losing them here would silently re-lock a policy already cleared.
@@ -45,6 +45,7 @@ export async function pullContent(store) {
     choices: q.choices, answer: q.answer, why: q.why, cite: q.cite,
     format: q.format ?? 'choice', minTier: q.min_tier ?? 1, accept: q.accept ?? null,
     key: q.is_key === true,
+    chain: q.chain_id ?? null, part: q.chain_part ?? null,
   });
   for (const p of policies) {
     store.items[p.id] = {
