@@ -1363,7 +1363,11 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v31';
+/* Beta numbering until launch, at Anton's instruction: the number keeps
+   climbing with every deploy (the update machinery needs each build to have a
+   fresh name), but the customer-facing word is beta. Going live, this becomes
+   'v1' and the beta counter retires. */
+export const APP_VERSION = 'beta 32';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;
