@@ -183,6 +183,11 @@
       <div class="meta">About ten questions per section, the ones that carry the critical
         numbers, exceptions and terms. Clearing a section in simple mode means clearing
         those. Switch it off any time for the full bank.</div>
+      <label class="meta" for="prefPass">My pass mark (percent)</label>
+      <input type="number" id="prefPass" min="50" max="100" inputmode="numeric">
+      <div class="meta">The score a sitting needs before a section can clear, for you
+        alone. 90 is the standard and the default. Every cleared section keeps a record
+        of the score and the mark it was cleared with.</div>
       <button class="toggle ghost" id="prefUnlock" data-on="false">Let me study any section, in any order</button>
       <div class="meta">Locked order is how the course is meant to be taken: one policy
         until it is clear. Switch this on if you only want one particular area.</div>
@@ -256,10 +261,10 @@
     <div class="card stack">
       <div class="mini">How a section is cleared</div>
       <div class="meta">
-        A session is every question in the policy, however many that policy turned out
-        to have. Clearing it needs 90 percent in one sitting and nothing still wrong
-        after two misses. These are fixed on purpose: a number that decides what
-        counts as passed is not a preference.
+        A session is every question in the policy (its key questions, in simple mode),
+        however many that turned out to be. Clearing it needs your pass mark in one
+        sitting - 90 by default, yours to set above - and nothing still wrong after two
+        misses. The repeat-miss rule and full coverage are fixed on purpose.
       </div>
     </div>
 

@@ -170,7 +170,7 @@ function renderHome() {
   $('policies').innerHTML = list.length ? list.map((p) => {
     const bank = store.banks[p.id];
     const c = coverage(store.items[p.id], bank);
-    const g = gate(p.id, store.items[p.id], store.progress, bank, simpleOn());
+    const g = gate(p.id, store.items[p.id], store.progress, bank, simpleOn(), passMark());
     const st = policyStats(p.id, store.items[p.id], bank, store.progress);
     const state = !hasQuestions(p) ? 'reading only'
       : p.passed ? 'passed'
@@ -189,7 +189,9 @@ function renderHome() {
     return `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b${state === 'locked' ? ' style="color:#6b7480"' : ''}>${esc(p.title)}</b>
-        <span class="pill ${state === 'passed' ? 'ok' : state === 'in focus' ? 'warn' : ''}">${state}</span>
+        <span class="pill ${state === 'passed' ? 'ok' : state === 'in focus' ? 'warn' : ''}">${state}${
+          state === 'passed' && p.passedPct != null
+            ? ` · ${p.passedPct}%${p.passedMark != null && p.passedMark !== 90 ? ` (mark ${p.passedMark})` : ''}` : ''}</span>
       </div>
       ${state === 'locked' ? '' : masteryBar(st)}
       <div class="row" style="margin-top:10px">
@@ -604,12 +606,33 @@ function finish() {
     asked: S.answered, right: currentRight, pct, synced: false,
   });
 
-  const g = gate(S.currentId, store.items[S.currentId], store.progress, store.banks[S.currentId], simpleOn());
+  const g = gate(S.currentId, store.items[S.currentId], store.progress, store.banks[S.currentId], simpleOn(), passMark());
   if (g.passed) {
     const p = store.index.policies.find((x) => x.id === S.currentId);
-    if (p && !p.passed) { p.passed = true; p.passedAt = Date.now(); }
+    if (p && !p.passed) {
+      p.passed = true;
+      p.passedAt = Date.now();
+      // What it was cleared WITH, kept forever: the score and the mark in
+      // force at the time. A dashboard that says "passed" without saying at
+      // what standard is a dashboard that can lie to you later.
+      p.passedPct = g.bestPct;
+      p.passedMark = g.mark;
+    }
   }
   save();
+  // Rule 3 as a plain sentence, at the exact moment it is the only blocker.
+  // Coverage done, score made, and still not through: without this popup that
+  // reads as a broken app rather than as the leech rule doing its job.
+  if (g.blockedOnlyByLeeches) {
+    const nl = String.fromCharCode(10);
+    const names = g.leeches.slice(0, 5).map((l) => '- ' + l.label).join(nl);
+    alert('Your score cleared the bar, but the section stays locked because of '
+      + g.leeches.length + ' repeat miss' + (g.leeches.length > 1 ? 'es' : '')
+      + ' - things answered wrong twice and not yet fixed:' + nl + nl + names
+      + (g.leeches.length > 5 ? nl + '...' : '')
+      + nl + nl + 'Get each one right once and the section clears. '
+      + 'They will keep appearing until you do.');
+  }
 
   // The headline score is the one the gate uses, so the screen cannot say 93%
   // while the rule is judging 89%.
@@ -675,6 +698,12 @@ const formatOn = (f) => prefs().formats?.[f] !== false;
    them. His call, made knowing it reverses the 20 Aug whole-bank rule for
    this mode. Personal, per phone, like reading aloud. */
 const simpleOn = () => prefs().simple === true;
+/* The pass mark: this person's own, default 90. Clamped 50-100, so a typo can
+   neither make sections free nor make them impossible. */
+const passMark = () => {
+  const n = Number(prefs().passMark);
+  return Number.isFinite(n) && n >= 50 && n <= 100 ? n : 90;
+};
 function setFormatPref(f, on) {
   const p = prefs();
   p.formats = { ...(p.formats ?? {}), [f]: on };
@@ -740,6 +769,7 @@ function paintSettings() {
   $('copymsg').textContent = 'Send them this, then create their account above.';
   $('prefUnlock').dataset.on = String(unlockedAll());
   $('prefSimple').dataset.on = String(simpleOn());
+  $('prefPass').value = passMark();
   renderFormatToggles();
   $('pwNew').value = '';
   $('pwAgain').value = '';
@@ -1083,6 +1113,12 @@ $('prefSimple').onclick = function () {
   setPref('simple', on);
   renderHome();
 };
+$('prefPass').onchange = function () {
+  const n = Math.min(100, Math.max(50, Number(this.value) || 90));
+  this.value = n;
+  setPref('passMark', n);
+  renderHome();
+};
 $('prefUnlock').onclick = function () {
   const on = this.dataset.on !== 'true';
   this.dataset.on = String(on);
@@ -1120,7 +1156,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v26';
+export const APP_VERSION = 'v27';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

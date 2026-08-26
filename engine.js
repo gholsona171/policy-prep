@@ -171,7 +171,11 @@ export function questionCoverage(policyId, progress, bank, simple = false) {
  * and nothing may still be wrong after repeated misses, because a percentage
  * alone can be cleared while carrying a handful of facts you reliably get wrong.
  */
-export function gate(policyId, items, progress, bank, simple = false) {
+/* passPct: the pass mark for THIS user. Defaults to the department-standard 90.
+   Made per-user on 26 Aug 2026 at Anton's instruction - a personal dial, never a
+   master setting, so it can only ever move the bar for the person holding the
+   phone. Coverage (rule 1) and the leech rule (rule 3) stay hard-coded. */
+export function gate(policyId, items, progress, bank, simple = false, passPct = CONFIG.PASS_PCT) {
   const need = requiredForGate(bank, simple);
   const best = progress.sessions
     .filter((s) => s.currentId === policyId && s.currentCount >= need)
@@ -179,10 +183,16 @@ export function gate(policyId, items, progress, bank, simple = false) {
 
   const outstanding = leeches(items, progress);
   const cov = questionCoverage(policyId, progress, bank, simple);
-  const scoreOk = !!best && best.pct >= CONFIG.PASS_PCT;
+  const mark = Math.min(100, Math.max(50, Number(passPct) || CONFIG.PASS_PCT));
+  const scoreOk = !!best && best.pct >= mark;
 
   return {
     passed: cov.complete && scoreOk && outstanding.length === 0,
+    mark,
+    // The one case rule 3 is the ONLY thing in the way: coverage done, score
+    // made, and repeat misses still standing. The app pops a plain explanation
+    // then, because "why can I not move on" must never be a mystery.
+    blockedOnlyByLeeches: cov.complete && scoreOk && outstanding.length > 0,
     bestPct: best ? best.pct : null,
     scoreOk,
     need,
@@ -192,7 +202,7 @@ export function gate(policyId, items, progress, bank, simple = false) {
       ? `${cov.total - cov.done} of ${cov.total} questions in this policy still unanswered.`
       : !best
       ? `No complete sitting yet. A qualifying session is all ${need} questions in one go.`
-      : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${CONFIG.PASS_PCT}%.`
+      : !scoreOk ? `Best qualifying session is ${best.pct}%, needs ${mark}%.`
       : outstanding.length ? `${outstanding.length} item(s) still wrong after ${CONFIG.LEECH_THRESHOLD}+ misses.`
       : 'Passed.',
   };

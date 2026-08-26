@@ -110,6 +110,7 @@ export async function pushProgress(store) {
       body: passed.map((p) => ({
         user_id: uid, policy_id: p.id, passed: true,
         passed_at: new Date(p.passedAt ?? Date.now()).toISOString(),
+        pass_pct: p.passedPct ?? null, pass_mark: p.passedMark ?? null,
       })),
     });
   }
@@ -121,7 +122,7 @@ export async function pullProgress(store) {
   // accuracy and can un-pass a policy they cleared.
   const answers = await dbAll('answers?select=policy_id,item_id,question_id,choice,correct,at&order=at');
   const sessions = await dbAll('sessions?select=id,policy_id,current_count,asked,correct,pct,at&order=at');
-  const states = await dbAll('policy_state?select=policy_id,passed,passed_at&order=policy_id');
+  const states = await dbAll('policy_state?select=policy_id,passed,passed_at,pass_pct,pass_mark&order=policy_id');
   if (!answers || !sessions) return;
 
   store.progress.answers = answers.map((a) => ({
@@ -136,8 +137,13 @@ export async function pullProgress(store) {
   // Both directions. Setting passed only when the server says so meant a policy
   // could never become un-passed, so wiping your history left every policy
   // still unlocked and the app claiming work you no longer had a record of.
-  const passedIds = new Set((states ?? []).filter((s) => s.passed).map((s) => s.policy_id));
-  store.index.policies.forEach((p) => { p.passed = passedIds.has(p.id); });
+  const byId = new Map((states ?? []).filter((s) => s.passed).map((s) => [s.policy_id, s]));
+  store.index.policies.forEach((p) => {
+    const st = byId.get(p.id);
+    p.passed = !!st;
+    p.passedPct = st?.pass_pct ?? p.passedPct ?? null;
+    p.passedMark = st?.pass_mark ?? p.passedMark ?? null;
+  });
 }
 
 /** One round trip: send what is queued, then take the server's version of everything. */
