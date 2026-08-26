@@ -95,6 +95,7 @@ export function lightOf(store) {
     progress: store.progress,
     open: store.open,
     settings: store.settings,
+    contentRev: store.contentRev,
   };
 }
 

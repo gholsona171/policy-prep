@@ -2,8 +2,8 @@ import {
   buildSession, coverage, gate, policyStats, itemStats,
 } from './engine.js';
 import {
-  signIn, signUp, signOut, signedIn, currentEmail, rpc, policyPdfUrl, db, changePassword,
-  deviceId, deviceLabel,
+  signIn, signUp, signOut, signedIn, currentEmail, currentUserId, rpc, policyPdfUrl, db,
+  changePassword, deviceId, deviceLabel,
 } from './supa.js';
 import { syncAll } from './sync.js';
 import {
@@ -18,7 +18,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras', 'suggest'];
 // The screen Settings was opened from, so its Back button can undo the trip.
 let cameFrom = 'home';
 const go = (name) => {
@@ -1273,6 +1273,35 @@ const menuOpen = (on) => {
   $('menudrop').classList.toggle('hide', !on);
 };
 $('menusettings').onclick = () => { menuOpen(false); paintSettings(); go('settings'); };
+$('sugloadbtn').onclick = async () => {
+  try {
+    const rows = await rpc('master_list_suggestions') || [];
+    $('suglist').innerHTML = rows.length ? rows.map((r) => `<div class="card stack">
+        <div>${esc(r.body)}</div>
+        <div class="mini">${esc(r.email)} &middot; ${String(r.created_at).slice(0, 10)} &middot; ${esc(r.status)}</div>
+        <div class="row">
+          <button class="small ghost" data-sug="${r.id}" data-set="planned">Planned</button>
+          <button class="small ghost" data-sug="${r.id}" data-set="done">Done</button>
+          <button class="small ghost" data-sug="${r.id}" data-set="declined">No</button>
+          <button class="small ghost" data-sug="${r.id}" data-set="reply">Reply</button>
+        </div>
+      </div>`).join('') : '<div class="meta">The box is empty.</div>';
+    $('suglist').querySelectorAll('[data-sug]').forEach((b) => {
+      b.onclick = async () => {
+        try {
+          if (b.dataset.set === 'reply') {
+            const text = prompt('Reply to the customer:');
+            if (!text) return;
+            await rpc('master_set_suggestion', { p_id: b.dataset.sug, p_status: 'planned', p_reply: text });
+          } else {
+            await rpc('master_set_suggestion', { p_id: b.dataset.sug, p_status: b.dataset.set });
+          }
+          $('sugloadbtn').onclick();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { $('suglist').innerHTML = `<div class="meta">${esc(e.message)}</div>`; }
+};
 $('pushbuild').onclick = async () => {
   $('pushbuild').disabled = true;
   $('pushmsg').textContent = 'Setting the floor...';
@@ -1297,6 +1326,38 @@ $('menupractice').onclick = () => {
   go('extras');
 };
 $('menustats').onclick = () => { menuOpen(false); renderStats(); go('stats'); };
+$('menusuggest').onclick = () => { menuOpen(false); renderSuggestions(); go('suggest'); };
+$('suggestback').onclick = () => { renderHome(); go('home'); };
+$('suggestsend').onclick = async () => {
+  const body = $('suggesttext').value.trim();
+  if (body.length < 3) return ($('suggestmsg').textContent = 'Say a little more than that.');
+  $('suggestsend').disabled = true;
+  $('suggestmsg').textContent = 'Sending...';
+  try {
+    await db('suggestions', { method: 'POST', prefer: 'return=minimal',
+      body: { user_id: currentUserId(), body } });
+    $('suggesttext').value = '';
+    $('suggestmsg').textContent = 'Sent. Answers show up on this screen.';
+    renderSuggestions();
+  } catch (e) {
+    $('suggestmsg').textContent = navigator.onLine ? e.message
+      : 'Needs a connection. Copy it and send again on signal.';
+  }
+  $('suggestsend').disabled = false;
+};
+
+const SUG_STATUS = { new: 'received', planned: 'planned', done: 'done', declined: 'not planned' };
+async function renderSuggestions() {
+  $('suggestmsg').textContent = '';
+  try {
+    const rows = await db('suggestions?select=body,created_at,status,reply&order=created_at.desc');
+    $('suggestlist').innerHTML = (rows ?? []).map((r) => `<div class="card stack">
+      <div>${esc(r.body)}</div>
+      <div class="mini">${String(r.created_at).slice(0, 10)} &middot; ${esc(SUG_STATUS[r.status] ?? r.status)}</div>
+      ${r.reply ? `<div class="meta">Reply: ${esc(r.reply)}</div>` : ''}
+    </div>`).join('') || '<div class="meta">Nothing sent yet.</div>';
+  } catch { $('suggestlist').innerHTML = ''; }
+}
 $('extrasback').onclick = () => { renderHome(); go('home'); };
 $('menuresync').onclick = () => { menuOpen(false); sync(false); };
 // A tap anywhere else closes it, the way small menus are expected to behave.
@@ -1379,6 +1440,24 @@ $('home2').onclick = () => { renderHome(); go('home'); };
    before anything that could throw, because the point is to prove the imports
    resolved, not that the whole app is happy. */
 window.policyPrepBooted = true;
+
+/* The app tells on itself: an uncaught error becomes one row the master can
+   read from the PC, so a broken build shows up in a table instead of an angry
+   text. Hard-capped per session, and it must never be able to break anything
+   itself, so every step is swallowed. */
+let errorsSent = 0;
+function reportError(message, stack) {
+  try {
+    if (errorsSent >= 3 || !signedIn() || !navigator.onLine) return;
+    errorsSent++;
+    db('client_errors', { method: 'POST', prefer: 'return=minimal',
+      body: { user_id: currentUserId(), build: BUILD,
+        message: String(message).slice(0, 500), stack: String(stack ?? '').slice(0, 2000),
+        ua: navigator.userAgent.slice(0, 300) } }).catch(() => {});
+  } catch { /* never let telemetry hurt the app */ }
+}
+window.addEventListener('error', (e) => reportError(e.message, e.error?.stack));
+window.addEventListener('unhandledrejection', (e) => reportError(e.reason?.message ?? e.reason, e.reason?.stack));
 sessionStorage.removeItem('policy-prep-recovered');
 
 if (signedIn()) {
@@ -1402,7 +1481,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 33;
+export const BUILD = 34;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {

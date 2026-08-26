@@ -146,13 +146,28 @@ export async function pullProgress(store) {
   });
 }
 
-/** One round trip: send what is queued, then take the server's version of everything. */
+/** One round trip: send what is queued, then take the server's version of
+    what has actually changed.
+
+    Content is about 6.5 MB and used to be re-downloaded on every single sync,
+    which at a handful of daily customers would have walked straight through
+    the hosting bandwidth allowance. The settings row now carries content_rev,
+    bumped by every publish, and content moves only when that number does.
+    Settings and progress are small and stay always-synced. */
 export async function syncAll(store) {
   await pushProgress(store);
-  // Settings are a convenience; the engine has working defaults without them.
-  // Letting a settings failure abort the sync would stop new policies and
-  // answered questions moving, which is the part that actually matters.
-  try { await pullSettings(store); } catch { /* keep whatever we had */ }
-  await pullContent(store);
+  let rev = null;
+  try {
+    await pullSettings(store);
+    rev = Number(store.settings?.content_rev) || null;
+  } catch { /* keep whatever we had */ }
+  const have = Number(store.contentRev) || 0;
+  const empty = !store.index.policies.length;
+  // No rev (old server, failed settings pull) means pull, because stale
+  // content is worse than a large download. A matching rev means skip.
+  if (empty || rev === null || rev !== have) {
+    const ok = await pullContent(store);
+    if (ok && rev !== null) store.contentRev = rev;
+  }
   await pullProgress(store);
 }

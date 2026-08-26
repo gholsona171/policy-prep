@@ -139,6 +139,7 @@
   <button id="menusettings">Settings</button>
   <div class="sep"></div>
   <button id="menupractice" class="hide">Practice &amp; testing</button>
+  <button id="menusuggest">Suggestions</button>
   <button id="menustats">Full breakdown</button>
   <button id="menuresync">Check for new policies</button>
   <div class="sep"></div>
@@ -149,6 +150,8 @@
   <div id="auth" class="hide">
     <h1>Policy Prep</h1>
     <p class="sub">Sign in once. After that it stays signed in and pulls new policies by itself.</p>
+    <p class="mini">Access is per person and works on one device at a time. Studying here
+      sharpens you; nobody can promise you a score.</p>
     <div class="card stack">
       <!-- autocapitalize/autocorrect off: iOS will happily capitalise the first letter
            of an email or "helpfully" correct a password, and the resulting failure looks
@@ -289,6 +292,12 @@
     </div>
 
     <div class="card stack">
+      <div class="mini">Suggestion box</div>
+      <button id="sugloadbtn" class="ghost">Read customer suggestions</button>
+      <div id="suglist"></div>
+    </div>
+
+    <div class="card stack">
       <div class="mini">How a section is cleared</div>
       <div class="meta">
         A session is every question in the policy (its key questions, in simple mode),
@@ -349,6 +358,20 @@
     <div id="practicecard" class="card stack hide"></div>
     <div id="testingcard" class="card stack hide"></div>
     <button id="extrasback" class="ghost">Back</button>
+  </div>
+
+  <div id="suggest" class="hide">
+    <h1>Suggestions</h1>
+    <p class="sub">What should this app do next? Requests land with the owner directly,
+      and answers show up here.</p>
+    <div class="card stack">
+      <textarea id="suggesttext" rows="4" maxlength="2000"
+        placeholder="A feature you want, something confusing, anything."></textarea>
+      <button id="suggestsend">Send it</button>
+      <div class="meta" id="suggestmsg"></div>
+    </div>
+    <div id="suggestlist"></div>
+    <button id="suggestback" class="ghost">Back</button>
   </div>
 
   <div id="stats" class="hide">
