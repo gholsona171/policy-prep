@@ -29,6 +29,7 @@ const go = (name) => {
   // No gear on Settings itself: a button that opens the screen you are already
   // looking at reads as broken, and Back is right there instead.
   $('gear').classList.toggle('hide', name === 'auth' || name === 'settings');
+  $('menudrop').classList.add('hide');
 };
 
 const blank = () => ({
@@ -1231,6 +1232,7 @@ async function afterSignIn() {
 $('signin').onclick = () => doAuth(signIn, 'Signing in');
 $('signup').onclick = () => doAuth(signUp, 'Creating account');
 $('signout').onclick = () => {
+  menuOpen(false);
   signOut();
   localStorage.removeItem(KEY);   // a shared phone must not leave one user's history behind
   clearContent().catch(() => {}); // and must not leave the content behind either
@@ -1245,8 +1247,18 @@ $('mcancel').onclick = () => { masterForm(false); $('mastermsg').textContent = '
 $('mroll').onclick = () => { $('mpass').value = rollPassword(); };
 $('mcreate').onclick = () => createCustomer();
 $('mlistbtn').onclick = () => loadCustomers();
-$('resync').onclick = () => sync(false);
-$('tostats').onclick = () => { renderStats(); go('stats'); };
+/* The three-line menu. One corner, one tap, everything that used to live at
+   the bottom of a long scroll: Settings first because it is why the menu
+   exists, then the occasional actions, then the way out. */
+const menuOpen = (on) => $('menudrop').classList.toggle('hide', !on);
+$('menusettings').onclick = () => { menuOpen(false); paintSettings(); go('settings'); };
+$('menustats').onclick = () => { menuOpen(false); renderStats(); go('stats'); };
+$('menuresync').onclick = () => { menuOpen(false); sync(false); };
+// A tap anywhere else closes it, the way small menus are expected to behave.
+document.addEventListener('click', (e) => {
+  if (!$('menudrop').classList.contains('hide')
+      && !$('menudrop').contains(e.target) && e.target !== $('gear')) menuOpen(false);
+});
 $('statsback').onclick = () => { renderHome(); go('home'); };
 $('readback').onclick = () => { renderHome(); go('home'); };
 $('readtest').onclick = () => startSection(reading);
@@ -1276,7 +1288,7 @@ $('quit').onclick = () => (S.answered ? finish() : (store.open = null, save(), r
 // The corner gear is reachable from every screen, so Back has to return to the
 // one it was opened from. Sending someone back to the home screen mid-session
 // would look exactly like their session had been thrown away.
-$('gear').onclick = () => { paintSettings(); go('settings'); };
+$('gear').onclick = () => menuOpen($('menudrop').classList.contains('hide'));
 $('setback').onclick = () => {
   const back = cameFrom === 'settings' ? 'home' : cameFrom;
   if (back === 'home') renderHome();
@@ -1341,7 +1353,7 @@ window.addEventListener('online', () => sync(true));
    the server for days while the phone keeps running the old one. This forces the issue:
    check for a new worker on every launch and on return to the foreground, and reload
    once the new one takes control. The guard stops a reload loop. */
-export const APP_VERSION = 'v29';
+export const APP_VERSION = 'v30';
 
 if ('serviceWorker' in navigator) {
   let reloading = false;

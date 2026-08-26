@@ -110,6 +110,17 @@
     background:var(--panel);border:1px solid var(--line);color:var(--dim);
     border-radius:20px;padding:8px 13px;font-size:16px;font-weight:500;line-height:1;
     box-shadow:0 2px 10px rgba(0,0,0,.4)}
+  /* The menu the three lines open. A short list, not a drawer: every item is
+     one tap and the screen behind stays visible, so it never feels like
+     leaving the app to change one thing. */
+  .menudrop{position:fixed;z-index:60;top:calc(46px + env(safe-area-inset-top));
+    right:calc(10px + env(safe-area-inset-right));min-width:220px;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 6px 24px rgba(0,0,0,.5);padding:6px;display:flex;flex-direction:column}
+  .menudrop button{background:none;border:none;color:var(--fg);text-align:left;
+    padding:12px 14px;font-size:15px;border-radius:8px;width:100%}
+  .menudrop button:active{background:var(--line)}
+  .menudrop .sep{height:1px;background:var(--line);margin:4px 8px}
   /* The corner buttons would otherwise sit on top of the heading. */
   body.hasmic .wrap{padding-top:calc(54px + env(safe-area-inset-top))}
 </style>
@@ -120,7 +131,15 @@
 <button id="micToggle" class="mic hide" data-on="false" aria-pressed="false">Aloud: off</button>
 <!-- The way into Settings from anywhere, including mid-session. Back returns to
      the screen it was opened from rather than dumping you on the home screen. -->
-<button id="gear" class="gear hide" aria-label="Settings" title="Settings">&#9881;</button>
+<button id="gear" class="gear hide" aria-label="Menu" title="Menu">&#9776;</button>
+<div id="menudrop" class="menudrop hide">
+  <button id="menusettings">Settings</button>
+  <div class="sep"></div>
+  <button id="menustats">Full breakdown</button>
+  <button id="menuresync">Check for new policies</button>
+  <div class="sep"></div>
+  <button id="signout">Sign out</button>
+</div>
 <div class="wrap">
 
   <div id="auth" class="hide">
@@ -159,14 +178,12 @@
     <div id="testingcard" class="card stack hide"></div>
     <div class="card stack">
       <button id="start">Start a session</button>
-      <button id="tostats" class="ghost">Full breakdown</button>
-      <button id="resync" class="ghost">Check for new policies</button>
+
       <div class="meta" id="syncmsg"></div>
     </div>
     <div class="card stack">
       <div class="meta" id="whoami"></div>
       <div class="mini" id="version"></div>
-      <button id="signout" class="ghost">Sign out</button>
     </div>
   </div>
 

@@ -1,7 +1,7 @@
 /* Offline shell. Caches only the app itself, never policy content, because policy
    content never travels over the network in the first place: it is loaded on the
    device and lives in localStorage. Bump CACHE to force an update. */
-const CACHE = 'policy-prep-v29';
+const CACHE = 'policy-prep-v30';
 const SHELL = ['./', 'index.html', 'app.js', 'engine.js', 'supa.js', 'sync.js', 'config.js',
   'content-store.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
