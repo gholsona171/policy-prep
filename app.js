@@ -833,6 +833,7 @@ const SWITCHES = {
   setSignup: 'allow_self_signup',
   setPdf: 'show_pdf',
   setRead: 'require_read_first',
+  setAwake: 'keepalive',
 };
 
 function settings() {
@@ -1529,7 +1530,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 36;
+export const BUILD = 37;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {

@@ -1,0 +1,26 @@
+# Keeps the free-tier database from pausing for inactivity.
+#
+# Supabase pauses a free project after about a week of total silence, and a
+# ping from inside the app cannot guard against that: if nobody opens the app
+# for a week, no phone ever pings. This runs on GitHub's clock instead, once a
+# day, whether every phone on earth is off.
+#
+# The master switch lives in the app (Settings > Updates > Keep the database
+# awake). The call itself is the day's activity either way; when the switch is
+# off the function answers "off", which is the signal that the guard is no
+# longer wanted (upgraded plan, or enough real daily users).
+name: keepalive
+on:
+  schedule:
+    - cron: '17 9 * * *'   # daily, 09:17 UTC - an odd minute avoids the top-of-hour stampede
+  workflow_dispatch: {}
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ping the database
+        run: |
+          R=$(curl -s -X POST "https://xmbiqxdozrysvoqxdbns.supabase.co/rest/v1/rpc/keepalive" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtYmlxeGRvenJ5c3ZvcXhkYm5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNTc1NTQsImV4cCI6MjEwMjgzMzU1NH0.OrJBNy0LZ1AOqJYiAKDgFUA-uEJuELdaVZX_QvqwKVI" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "database says: $R"
