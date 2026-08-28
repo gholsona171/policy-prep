@@ -1010,7 +1010,9 @@ async function resetProgress() {
   try {
     const r = await rpc('reset_my_progress');
     // Local first, so a phone that goes offline right now does not carry the
-    // old history back up on the next sync.
+    // old history back up on the next sync. The epoch marker is dropped too,
+    // so the next sync full-pulls the (now empty) truth instead of deltaing.
+    store.progressEpoch = null;
     store.progress = { answers: [], sessions: [] };
     store.open = null;
     store.index.policies.forEach((p) => { p.passed = false; });
@@ -1527,7 +1529,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 35;
+export const BUILD = 36;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {

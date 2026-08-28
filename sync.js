@@ -117,23 +117,81 @@ export async function pushProgress(store) {
   }
 }
 
-export async function pullProgress(store) {
-  // Also paged: someone working through 6603 questions passes a thousand answers
-  // in their first serious week, and a truncated history quietly rewrites their
-  // accuracy and can un-pass a policy they cleared.
+/* Progress pulls are DELTA with two safety devices, replacing the old model
+   that re-downloaded the whole history (a megabyte and growing) on every open.
+
+   One cheap sync_state() call returns the user's EPOCH and row COUNTS.
+   - The epoch moves when reset_my_progress runs, so a wiped history can never
+     leave ghost answers on a phone that raced past the reset.
+   - The counts are the tripwire: after the delta lands, local totals must
+     equal the server's. Any disagreement - an evicted localStorage, a write
+     the phone missed, a bug of ours - triggers one old-style full pull and
+     the phone heals on the spot. Likely rare; guaranteed cheap.
+
+   The device lock is what makes deltas safe at all: one device holds the
+   slot, so there is exactly one writer, and a NEW device starts empty and
+   full-pulls naturally. */
+
+const mapAnswers = (rows) => rows.map((a) => ({
+  at: Date.parse(a.at), policyId: a.policy_id, itemId: a.item_id,
+  questionId: a.question_id, choice: a.choice, correct: a.correct, synced: true,
+}));
+const mapSessions = (rows) => rows.map((s) => ({
+  id: s.id, at: Date.parse(s.at), currentId: s.policy_id,
+  currentCount: s.current_count, asked: s.asked, right: s.correct, pct: s.pct, synced: true,
+}));
+
+async function fullProgressPull(store) {
   const answers = await dbAll('answers?select=policy_id,item_id,question_id,choice,correct,at&order=at');
   const sessions = await dbAll('sessions?select=id,policy_id,current_count,asked,correct,pct,at&order=at');
-  const states = await dbAll('policy_state?select=policy_id,passed,passed_at,pass_pct,pass_mark,pass_simple&order=policy_id');
-  if (!answers || !sessions) return;
+  if (!answers || !sessions) return false;
+  store.progress.answers = mapAnswers(answers);
+  store.progress.sessions = mapSessions(sessions);
+  return true;
+}
 
-  store.progress.answers = answers.map((a) => ({
-    at: Date.parse(a.at), policyId: a.policy_id, itemId: a.item_id,
-    questionId: a.question_id, choice: a.choice, correct: a.correct, synced: true,
-  }));
-  store.progress.sessions = sessions.map((s) => ({
-    id: s.id, at: Date.parse(s.at), currentId: s.policy_id,
-    currentCount: s.current_count, asked: s.asked, right: s.correct, pct: s.pct, synced: true,
-  }));
+export async function pullProgress(store) {
+  let state = null;
+  try {
+    const { rpc } = await import('./supa.js');
+    state = await rpc('sync_state');
+  } catch { /* an old server or a blip: fall through to the full pull */ }
+
+  const epochMoved = state && state.epoch !== (store.progressEpoch ?? 0);
+  let pulled = false;
+
+  if (!state || epochMoved || !store.progress.answers.length) {
+    pulled = await fullProgressPull(store);
+  } else {
+    // Delta: only rows newer than the newest thing this phone has. The phone's
+    // own pushes come back too; the composite key keeps them from doubling.
+    const newest = Math.max(0, ...store.progress.answers.map((a) => a.at),
+      ...store.progress.sessions.map((x) => x.at));
+    const since = new Date(newest).toISOString();
+    const answers = await dbAll(`answers?select=policy_id,item_id,question_id,choice,correct,at&at=gt.${since}&order=at`);
+    const sessions = await dbAll(`sessions?select=id,policy_id,current_count,asked,correct,pct,at&at=gt.${since}&order=at`);
+    if (Array.isArray(answers) && Array.isArray(sessions)) {
+      const haveA = new Set(store.progress.answers.map((a) => `${a.questionId}|${a.at}`));
+      for (const a of mapAnswers(answers)) {
+        if (!haveA.has(`${a.questionId}|${a.at}`)) store.progress.answers.push(a);
+      }
+      const haveS = new Set(store.progress.sessions.map((x) => x.id));
+      for (const x of mapSessions(sessions)) if (!haveS.has(x.id)) store.progress.sessions.push(x);
+      pulled = true;
+    }
+  }
+
+  // The tripwire. Counting local rows costs nothing; disagreeing with the
+  // server means something was missed somewhere, and the cure is the old
+  // brute-force pull, once, right now.
+  if (state && pulled) {
+    const okA = store.progress.answers.filter((a) => a.synced).length === state.answers;
+    const okS = store.progress.sessions.filter((x) => x.synced).length === state.sessions;
+    if (!okA || !okS) await fullProgressPull(store);
+    store.progressEpoch = state.epoch;
+  }
+
+  const states = await dbAll('policy_state?select=policy_id,passed,passed_at,pass_pct,pass_mark,pass_simple&order=policy_id');
 
   // Both directions. Setting passed only when the server says so meant a policy
   // could never become un-passed, so wiping your history left every policy
