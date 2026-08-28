@@ -90,6 +90,7 @@ export function lightOf(store) {
         id: p.id, title: p.title, version: p.version, passed: p.passed,
         passedAt: p.passedAt, passedPct: p.passedPct, passedMark: p.passedMark,
         passedSimple: p.passedSimple,
+        track: p.track,
         source: p.source,
       })),
     },

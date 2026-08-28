@@ -21,7 +21,7 @@ export async function pullContent(store) {
   // past the server's per-request cap, and a truncated pull is indistinguishable
   // from a policy whose bank was never written.
   const policies = await dbAll(
-    'policies?select=id,title,sort_order,version,body_text,source_ref&order=sort_order');
+    'policies?select=id,title,sort_order,version,body_text,source_ref,track&order=sort_order');
   if (!policies) return false;
 
   const items = await dbAll('policy_items?select=policy_id,item_id,label,type,quote&order=policy_id,item_id');
@@ -35,6 +35,7 @@ export async function pullContent(store) {
   store.index.policies = policies.map((p) => ({
     id: p.id, title: p.title, version: p.version, passed: wasPassed.get(p.id) ?? false,
     text: p.body_text ?? null, source: p.source_ref ?? null,
+    track: p.track ?? 'po',
   }));
 
   store.items = {};

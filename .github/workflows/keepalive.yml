@@ -12,7 +12,10 @@
 name: keepalive
 on:
   schedule:
-    - cron: '17 9 * * *'   # daily, 09:17 UTC - an odd minute avoids the top-of-hour stampede
+    # Every five days, not seven: the pause line IS seven days of silence, and
+    # GitHub's scheduler may run late or skip. Five keeps a margin the drift
+    # cannot eat (worst month-end gap is six days). Six pings a month.
+    - cron: '17 9 1,6,11,16,21,26 * *'
   workflow_dispatch: {}
 jobs:
   ping:

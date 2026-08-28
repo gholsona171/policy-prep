@@ -149,7 +149,16 @@ function sectionBest(policyId) {
 }
 
 function renderHome() {
-  const list = store.index.policies;
+  const list = activePolicies();
+
+  // The side switcher, only once sergeant material exists at all.
+  $('trackswitch').innerHTML = sgtExists() ? `<div class="row" style="margin-bottom:10px">
+    <button class="toggle ghost" data-track="po" data-on="${activeTrack() === 'po'}">PO side</button>
+    <button class="toggle ghost" data-track="sgt" data-on="${activeTrack() === 'sgt'}">Sergeant side</button>
+  </div>` : '';
+  $('trackswitch').querySelectorAll('[data-track]').forEach((b) => {
+    b.onclick = () => { setPref('track', b.dataset.track); renderHome(); };
+  });
 
   // An unfinished session is the first thing on the screen, because it is the
   // thing most likely to be why the app was opened.
@@ -157,7 +166,7 @@ function renderHome() {
   $('resume').classList.toggle('hide', !open);
   if (open) {
     const title = open.drill ? `the ${open.drill}`
-      : list.find((p) => p.id === open.currentId)?.title ?? 'a policy';
+      : store.index.policies.find((p) => p.id === open.currentId)?.title ?? 'a policy';
     const when = new Date(open.savedAt || Date.now());
     $('resumeline').textContent =
       `${open.answered} of ${open.questions.length} answered on ${title}, `
@@ -218,6 +227,7 @@ function renderHome() {
     return `<div class="card">
       <div class="row" style="justify-content:space-between">
         <b${state === 'locked' ? ' style="color:#6b7480"' : ''}>${esc(p.title)}</b>
+        ${p.track === 'sgt' ? '<span class="pill warn">Sergeant&#39;s test &middot; Lt prep</span>' : ''}
         ${sectionBest(p.id)}
         <span class="pill ${state === 'passed' ? 'ok' : state === 'in focus' ? 'warn' : ''}">${state}${
           state === 'passed' && p.passedPct != null
@@ -272,9 +282,11 @@ const FORMAT_NAMES = {
 };
 
 function practicePool() {
+  const side = new Set(activePolicies().map((p) => p.id));
   const byFormat = {};
   for (const pack of Object.values(store.practice ?? {})) {
     for (const q of pack.questions ?? []) {
+      if (!side.has(q.policyId)) continue;
       (byFormat[q.format] = byFormat[q.format] ?? []).push(q);
     }
   }
@@ -325,7 +337,7 @@ const tier2Here = () => Object.keys(practicePool()).length > 0;
 
 const drillPool = (ids = null) => {
   const out = [];
-  for (const p of store.index.policies) {
+  for (const p of activePolicies()) {
     if (ids && !ids.includes(p.id)) continue;
     for (const q of lensed(store.banks[p.id])) {
       if ((q.minTier ?? 1) <= 1 && Array.isArray(q.choices) && q.choices.length === 4) out.push(q);
@@ -667,7 +679,7 @@ function renderStats() {
 function start(focusId = null, allowUnpassed = false) {
   // No size argument any more: a session is the whole policy, and the engine reads
   // that off the bank the import produced.
-  const built = buildSession(store, Date.now(), focusId, { allowUnpassed, simple: simpleOn() });
+  const built = buildSession(trackView(), Date.now(), focusId, { allowUnpassed, simple: simpleOn() });
   if (!built.questions.length) return alert('No questions available.');
   S = { ...built, i: 0, right: 0, answered: 0 };
   keepSession();
@@ -872,6 +884,17 @@ const formatOn = (f) => prefs().formats?.[f] !== false;
 const simpleOn = () => prefs().simple === true;
 // ON unless deliberately switched off - Anton's default for the leaderboard.
 const leaderboardOn = () => prefs().leaderboard !== false;
+
+/* The two sides of the app, 28 Aug 2026: the PO side (the base course) and
+   the Sergeant side (material for the sergeant's test - the study guide
+   toward lieutenant). Both open to everyone; a track is which LADDER a
+   policy belongs to, never who may see it. Each side runs its own sequence,
+   gate, and review mix, which falls out of one filter applied before the
+   engine ever looks. */
+const activeTrack = () => (prefs().track === 'sgt' ? 'sgt' : 'po');
+const activePolicies = () => store.index.policies.filter((p) => (p.track ?? 'po') === activeTrack());
+const sgtExists = () => store.index.policies.some((p) => p.track === 'sgt');
+const trackView = () => ({ ...store, index: { policies: activePolicies() } });
 /* The pass mark: this person's own, default 90. Clamped 50-100, so a typo can
    neither make sections free nor make them impossible. */
 const passMark = () => {
@@ -972,28 +995,12 @@ function paintSettings() {
     $(id).dataset.on = String(s[col] === true);
   });
   $('setmsg').textContent = '';
-  if (isMaster) fillTierPicker();
+
 }
 
 /* The tier list comes from the database so renaming a tier there renames it
    here without a deploy. Cached per app run; two rows do not need more. */
-let tiersCache = null;
-async function tierList() {
-  if (!tiersCache) {
-    try { tiersCache = await db('tiers?select=tier,name,blurb&order=tier') || []; }
-    catch { tiersCache = []; }
-  }
-  return tiersCache;
-}
-const tierName = (t) => (tiersCache ?? []).find((r) => r.tier === t)?.name ?? `tier ${t}`;
 
-async function fillTierPicker() {
-  const rows = await tierList();
-  $('mtier').innerHTML = rows.length
-    ? rows.map((r) => `<option value="${r.tier}">${esc(r.name)}</option>`).join('')
-    : '<option value="1">Foundations</option>';
-  $('mtier').value = '1'; // new people start at the bottom unless said otherwise
-}
 
 /** Wipes this account's study history, on the server and on this phone.
     Two taps, because it cannot be undone. */
@@ -1131,13 +1138,12 @@ async function createCustomer() {
   try {
     const r = await rpc('master_add_customer', {
       p_email: email, p_password: password, p_days: days, p_note: note || null,
-      p_tier: Number($('mtier').value) || 1,
     });
     masterForm(false);
     // The one thing they need is on screen in a block they can read out or copy.
     $('handout').innerHTML = `<b>${r.created ? 'Account created' : 'Existing account, password reset'}</b>
       ${esc(r.email)}<br>${esc(r.password)}<br>
-      <span class="meta">${tierName(r.tier ?? 1)} &middot; ${r.expires_at ? 'expires ' + String(r.expires_at).slice(0, 10) : 'does not expire'}</span>`;
+      <span class="meta">${r.expires_at ? 'expires ' + String(r.expires_at).slice(0, 10) : 'does not expire'}</span>`;
     $('handout').classList.remove('hide');
     $('mastermsg').textContent = 'Read those two lines to them. Tap them to copy.';
     $('handout').onclick = () => {
@@ -1155,25 +1161,11 @@ async function createCustomer() {
 async function loadCustomers() {
   try {
     const rows = await rpc('master_list_customers') || [];
-    await tierList();
-    const tiers = tiersCache ?? [];
-    const topTier = tiers.length ? Math.max(...tiers.map((t) => t.tier)) : 1;
-    // Promotion is one tap: they paid, and a misfire loses nothing. Demotion
-    // takes something away, so it arms first, exactly like Revoke.
-    const moveBtn = (r) => {
-      const t = r.tier ?? 1;
-      if (t < topTier) {
-        return `<button class="small ghost" data-tier="${t + 1}" data-temail="${esc(r.email)}">
-          Move to ${esc(tierName(t + 1))}</button>`;
-      }
-      if (t > 1) {
-        return `<button class="small ghost" data-tier="${t - 1}" data-temail="${esc(r.email)}" data-arm="1">
-          Back to ${esc(tierName(t - 1))}</button>`;
-      }
-      return '';
-    };
+    // Tiers retired 28 Aug 2026: everyone with access gets everything. The
+    // database functions stay dormant; nothing here offers them.
+    const moveBtn = () => '';
     $('mlist').innerHTML = rows.length ? rows.map((r) => `<div class="cust">
-        <span>${esc(r.email)}<br><span class="mini">${esc(tierName(r.tier ?? 1))} &middot; ${r.live
+        <span>${esc(r.email)}<br><span class="mini">${r.live
           ? (r.expires_at ? 'until ' + String(r.expires_at).slice(0, 10) : 'no expiry')
           : 'expired'}${r.note ? ' &middot; ' + esc(r.note) : ''}${r.device_label
           ? ` &middot; on ${esc(r.device_label)} since ${String(r.device_claimed).slice(0, 10)}`
@@ -1182,20 +1174,6 @@ async function loadCustomers() {
           ? `<button class="small ghost" data-release="${esc(r.email)}">Release device</button>` : ''}
         <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button></span>
       </div>`).join('') : '<div class="meta">Nobody has been given access yet.</div>';
-    document.querySelectorAll('[data-temail]').forEach((b) => {
-      b.onclick = async () => {
-        if (b.dataset.arm === '1' && b.dataset.armed !== '1') {
-          b.dataset.armed = '1'; b.textContent = 'Sure?';
-          setTimeout(() => { b.dataset.armed = ''; b.textContent = `Back to ${tierName(Number(b.dataset.tier))}`; }, 4000);
-          return;
-        }
-        try {
-          const r = await rpc('master_set_tier', { p_email: b.dataset.temail, p_tier: Number(b.dataset.tier) });
-          $('mastermsg').textContent = `${r.email} is now on ${tierName(r.tier)}. Their phone picks it up on its next sync.`;
-          await loadCustomers();
-        } catch (e) { $('mastermsg').textContent = e.message; }
-      };
-    });
     document.querySelectorAll('[data-release]').forEach((b) => {
       b.onclick = async () => {
         if (b.dataset.armed !== '1') {
@@ -1530,7 +1508,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 37;
+export const BUILD = 38;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
