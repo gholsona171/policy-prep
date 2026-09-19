@@ -352,6 +352,15 @@
   <div id="read" class="hide">
     <h1 id="readtitle"></h1>
     <p class="sub" id="readsource"></p>
+    <div class="card stack hide" id="listencard">
+      <div class="row">
+        <button id="audioplay" style="flex:1">Listen to this policy</button>
+        <button id="audiospeed" class="small ghost">1x</button>
+      </div>
+      <div class="meta" id="audiomsg">Keeps playing with your screen locked -
+        pocket the phone and go.</div>
+    </div>
+    <audio id="policyaudio" preload="none"></audio>
     <div class="card">
       <div class="policy" id="readbody"></div>
     </div>

@@ -3,7 +3,7 @@ import {
 } from './engine.js';
 import {
   signIn, signUp, signOut, signedIn, currentEmail, currentUserId, rpc, policyPdfUrl, db,
-  changePassword, deviceId, deviceLabel,
+  changePassword, deviceId, deviceLabel, authToken,
 } from './supa.js';
 import { syncAll } from './sync.js';
 import {
@@ -579,8 +579,117 @@ function openReading(id) {
   $('readbody').textContent = p.text;
   $('readtest').textContent = p.passed ? 'Revise this one' : 'Take the test on this';
   $('pdfmsg').textContent = '';
+  armAudio(p);
   markRead(id);
   go('read');
+}
+
+/* ---------------------------------------------------------- listen aloud
+   Anton's requirement, 19 Sep 2026: people listen while running with the
+   phone LOCKED, in a voice that is the product's own - so this is real audio,
+   narrated once on the PC, not the phone's speech engine. The file is fetched
+   with the user's token (the <audio> tag cannot send one), cached on the
+   phone so every later listen costs no data, and played through MediaSession
+   so the lock screen shows the policy and its controls. */
+
+const AUDIO_CACHE = 'policy-prep-audio-v1';
+const AUDIO_KEEP = 12;   // most-recent policies kept on the phone (~60 MB)
+let audioUrl = null;     // the object URL currently loaded into the element
+
+async function cachedAudio(id) {
+  const cache = await caches.open(AUDIO_CACHE);
+  const key = `/audio/${id}.mp3`;
+  let res = await cache.match(key);
+  if (!res) {
+    const token = await authToken();
+    const { SUPABASE_URL, SUPABASE_ANON_KEY } = await import('./config.js');
+    const live = await fetch(`${SUPABASE_URL}/storage/v1/object/authenticated/policy-audio/${id}.mp3`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` } });
+    if (!live.ok) throw new Error(live.status === 400 || live.status === 404
+      ? 'No narration on file for this policy yet.'
+      : 'Could not fetch the narration. Are you online?');
+    await cache.put(key, live.clone());
+    res = live;
+    trimAudioCache(cache);
+  }
+  return res.blob();
+}
+
+/** Oldest listens leave the phone first, so 80 policies can never quietly
+    eat half a gigabyte of somebody's storage. */
+async function trimAudioCache(cache) {
+  try {
+    const order = JSON.parse(localStorage.getItem('policy-prep-audio-lru') || '[]');
+    const fresh = [...new Set([reading, ...order])].slice(0, AUDIO_KEEP);
+    localStorage.setItem('policy-prep-audio-lru', JSON.stringify(fresh));
+    for (const req of await cache.keys()) {
+      const id = req.url.split('/').pop().replace('.mp3', '');
+      if (!fresh.includes(id)) await cache.delete(req);
+    }
+  } catch { /* a full cache is survivable; a crashed player is not */ }
+}
+
+const AUDIO_SPEEDS = [1, 1.25, 1.5, 0.75];
+
+function armAudio(p) {
+  const el = $('policyaudio');
+  el.pause();
+  if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+  el.removeAttribute('src');
+  $('listencard').classList.toggle('hide', p.hasAudio !== true);
+  if (p.hasAudio !== true) return;
+  $('audioplay').textContent = 'Listen to this policy';
+  $('audioplay').disabled = false;
+  $('audiomsg').textContent = 'Keeps playing with your screen locked - pocket the phone and go.';
+}
+
+async function playAudio() {
+  const p = store.index.policies.find((x) => x.id === reading);
+  if (!p) return;
+  const el = $('policyaudio');
+
+  if (el.src && !el.paused) { el.pause(); return; }
+  if (el.src) { el.play(); return; }
+
+  $('audioplay').disabled = true;
+  $('audioplay').textContent = 'Loading...';
+  try {
+    const blob = await cachedAudio(p.id);
+    audioUrl = URL.createObjectURL(blob);
+    el.src = audioUrl;
+    // Pick up where this policy was left off, like an audiobook.
+    const pos = Number((prefs().audioPos ?? {})[p.id]) || 0;
+    if (pos > 5) el.currentTime = pos - 3;   // back up a breath
+    el.playbackRate = AUDIO_SPEEDS[Number(prefs().audioSpeed) || 0] ?? 1;
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: p.title, artist: 'Policy Prep',
+        artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }],
+      });
+      navigator.mediaSession.setActionHandler('play', () => el.play());
+      navigator.mediaSession.setActionHandler('pause', () => el.pause());
+      navigator.mediaSession.setActionHandler('seekbackward', () => { el.currentTime -= 15; });
+      navigator.mediaSession.setActionHandler('seekforward', () => { el.currentTime += 30; });
+    }
+    await el.play();
+  } catch (e) {
+    $('audiomsg').textContent = e.message;
+    $('audioplay').textContent = 'Listen to this policy';
+  }
+  $('audioplay').disabled = false;
+}
+
+function audioTick() {
+  const el = $('policyaudio');
+  if (!reading || !el.duration) return;
+  const pos = { ...(prefs().audioPos ?? {}) };
+  // Finished (or nearly) forgets the position; anything else remembers it.
+  if (el.currentTime > el.duration - 20) delete pos[reading];
+  else pos[reading] = Math.floor(el.currentTime);
+  setPref('audioPos', pos);
+  const m = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  $('audiomsg').textContent = `${m(el.currentTime)} of ${m(el.duration)}`;
 }
 
 /** The department's own document, laid out the way they laid it out. Fetched
@@ -1380,6 +1489,17 @@ document.addEventListener('click', (e) => {
 $('statsback').onclick = () => { renderHome(); go('home'); };
 $('readback').onclick = () => { renderHome(); go('home'); };
 $('readtest').onclick = () => startSection(reading);
+$('audioplay').onclick = () => playAudio();
+$('audiospeed').onclick = function () {
+  const i = ((Number(prefs().audioSpeed) || 0) + 1) % AUDIO_SPEEDS.length;
+  setPref('audioSpeed', i);
+  this.textContent = `${AUDIO_SPEEDS[i]}x`;
+  $('policyaudio').playbackRate = AUDIO_SPEEDS[i];
+};
+$('policyaudio').addEventListener('timeupdate', audioTick);
+$('policyaudio').addEventListener('play', () => { $('audioplay').textContent = 'Pause'; });
+$('policyaudio').addEventListener('pause', () => { $('audioplay').textContent = 'Resume'; });
+$('policyaudio').addEventListener('ended', () => { $('audioplay').textContent = 'Listen again'; });
 $('readpdf').onclick = () => openPdf();
 $('start').onclick = () => start();
 // Deliberately follows the normal sequence rather than repeating the last focus: after
@@ -1508,7 +1628,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 38;
+export const BUILD = 39;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {

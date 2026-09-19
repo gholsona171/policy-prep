@@ -101,6 +101,11 @@ async function fresh() {
   return d.access_token;
 }
 
+/** The current access token, refreshed if stale. The audio player needs it
+    because <audio> cannot send headers: the file is fetched with this token,
+    cached, and played from the local copy. */
+export async function authToken() { return fresh(); }
+
 /** Calls a database function. The master tools live behind these rather than in the
     app, because the app runs on a phone and anything it holds is readable. */
 export async function rpc(name, args = {}) {

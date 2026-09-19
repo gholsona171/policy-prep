@@ -91,6 +91,7 @@ export function lightOf(store) {
         passedAt: p.passedAt, passedPct: p.passedPct, passedMark: p.passedMark,
         passedSimple: p.passedSimple,
         track: p.track,
+        hasAudio: p.hasAudio,
         source: p.source,
       })),
     },
