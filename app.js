@@ -1289,6 +1289,7 @@ async function loadCustomers() {
           : ' &middot; no device yet'}</span></span>
         <span class="row">${moveBtn(r)}${r.device_label
           ? `<button class="small ghost" data-release="${esc(r.email)}">Release device</button>` : ''}
+        <button class="small ghost" data-newpass="${esc(r.email)}">New password</button>
         <button class="small ghost" data-revoke="${esc(r.email)}">Revoke</button></span>
       </div>`).join('') : '<div class="meta">Nobody has been given access yet.</div>';
     document.querySelectorAll('[data-release]').forEach((b) => {
@@ -1302,6 +1303,36 @@ async function loadCustomers() {
           await rpc('master_release_device', { p_email: b.dataset.release });
           $('mastermsg').textContent = `${b.dataset.release} can now sign in on a new device. The first one in takes the slot.`;
           await loadCustomers();
+        } catch (e) { $('mastermsg').textContent = e.message; }
+      };
+    });
+    /* Nobody can DISPLAY a password - they are stored one-way hashed, and that
+       is what keeps a leaked database survivable. What the counter moment
+       needs is a reset: armed like Revoke because it changes their login,
+       then a fresh password shown once in the same handout block account
+       creation uses, ready to read out. Only the password moves - expiry,
+       tier, device slot and history stay put. */
+    document.querySelectorAll('[data-newpass]').forEach((b) => {
+      b.onclick = async () => {
+        if (b.dataset.armed !== '1') {
+          b.dataset.armed = '1'; b.textContent = 'Sure?';
+          setTimeout(() => { b.dataset.armed = ''; b.textContent = 'New password'; }, 4000);
+          return;
+        }
+        try {
+          const r = await rpc('master_reset_password', {
+            p_email: b.dataset.newpass, p_password: rollPassword(),
+          });
+          $('handout').innerHTML = `<b>New password set</b>
+            ${esc(r.email)}<br>${esc(r.password)}<br>
+            <span class="meta">Their old password stopped working just now.</span>`;
+          $('handout').classList.remove('hide');
+          $('mastermsg').textContent = 'Read those two lines to them. Tap them to copy.';
+          $('handout').onclick = () => {
+            navigator.clipboard?.writeText(`${r.email}\n${r.password}`)
+              .then(() => { $('mastermsg').textContent = 'Copied.'; })
+              .catch(() => {});
+          };
         } catch (e) { $('mastermsg').textContent = e.message; }
       };
     });
@@ -1636,7 +1667,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 40;
+export const BUILD = 41;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
