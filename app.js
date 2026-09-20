@@ -598,7 +598,11 @@ let audioUrl = null;     // the object URL currently loaded into the element
 
 async function cachedAudio(id) {
   const cache = await caches.open(AUDIO_CACHE);
-  const key = `/audio/${id}.mp3`;
+  // The version in the key is the cache-buster: a re-narrated policy carries a
+  // higher audio_ver, misses the old entry, downloads fresh, and the trimmer
+  // sweeps the stale copy. Without it a phone would keep the old voice forever.
+  const ver = store.index.policies.find((p) => p.id === id)?.audioVer ?? 1;
+  const key = `/audio/${id}.mp3?v=${ver}`;
   let res = await cache.match(key);
   if (!res) {
     const token = await authToken();
@@ -623,8 +627,12 @@ async function trimAudioCache(cache) {
     const fresh = [...new Set([reading, ...order])].slice(0, AUDIO_KEEP);
     localStorage.setItem('policy-prep-audio-lru', JSON.stringify(fresh));
     for (const req of await cache.keys()) {
-      const id = req.url.split('/').pop().replace('.mp3', '');
-      if (!fresh.includes(id)) await cache.delete(req);
+      const name = req.url.split('/').pop();
+      const id = name.replace(/\.mp3(\?.*)?$/, '');
+      const ver = Number((name.match(/\?v=(\d+)/) || [])[1]) || 1;
+      const cur = store.index.policies.find((p) => p.id === id)?.audioVer ?? 1;
+      // Gone from the keep-list, or superseded by a newer narration: delete.
+      if (!fresh.includes(id) || ver !== cur) await cache.delete(req);
     }
   } catch { /* a full cache is survivable; a crashed player is not */ }
 }
@@ -1628,7 +1636,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 39;
+export const BUILD = 40;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
