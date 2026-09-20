@@ -381,6 +381,21 @@
     <button id="extrasback" class="ghost">Back</button>
   </div>
 
+  <div id="newpass" class="hide">
+    <h1>Make it yours</h1>
+    <p class="sub">The password you signed in with was a temporary one, read out when your
+      account was set up. Pick your own now - nobody else will ever know it, and nobody
+      can look it up, not even the owner.</p>
+    <div class="card stack">
+      <input type="password" id="npNew" placeholder="New password (8 or more characters)"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <input type="password" id="npAgain" placeholder="Same password again"
+             autocapitalize="none" autocorrect="off" spellcheck="false">
+      <button id="npSave">Set my password</button>
+      <div class="meta" id="npMsg"></div>
+    </div>
+  </div>
+
   <div id="suggest" class="hide">
     <h1>Suggestions</h1>
     <p class="sub">What should this app do next? Requests land with the owner directly,

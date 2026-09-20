@@ -18,7 +18,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras', 'suggest'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras', 'suggest', 'newpass'];
 // The screen Settings was opened from, so its Back button can undo the trip.
 let cameFrom = 'home';
 const go = (name) => {
@@ -1397,7 +1397,39 @@ async function claimThisDevice() {
   }
 }
 
+/* A master-set password is temporary by definition: it was read out loud at
+   the counter. This walls the next sign-in into choosing a real one. The wall
+   is as strong as it needs to be - the menu is hidden on this screen and
+   every path forward runs through the save button. Offline can't reach here,
+   because a temp password only exists right after a counter visit. */
+async function enforceTempPassword() {
+  try {
+    if (await rpc('password_is_temp') !== true) return false;
+  } catch { return false; }   // offline or old server: don't lock anyone out
+  go('newpass');
+  $('gear').classList.add('hide');
+  return true;
+}
+
+$('npSave').onclick = async () => {
+  const a = $('npNew').value, b = $('npAgain').value;
+  if (a.length < 8) return ($('npMsg').textContent = 'Eight characters or more.');
+  if (a !== b) return ($('npMsg').textContent = 'Those two do not match.');
+  $('npSave').disabled = true;
+  $('npMsg').textContent = 'Saving...';
+  try {
+    await changePassword(a);
+    await rpc('password_made_own');
+    $('npNew').value = ''; $('npAgain').value = '';
+    $('gear').classList.remove('hide');
+    renderHome();
+    go('home');
+  } catch (e) { $('npMsg').textContent = e.message; }
+  $('npSave').disabled = false;
+};
+
 async function afterSignIn() {
+  if (await enforceTempPassword()) { sync(true); return; }
   renderHome();
   go('home');
   checkMaster();
@@ -1648,6 +1680,7 @@ sessionStorage.removeItem('policy-prep-recovered');
 
 if (signedIn()) {
   claimThisDevice();   // no await: the server enforces regardless; this just explains
+  enforceTempPassword();   // a killed app must not dodge the wall on relaunch
   go('home');
   // Paint once from whatever is already on the device, then again once the content
   // is back from IndexedDB, then the sync paints a third time with the server's copy.
@@ -1667,7 +1700,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 41;
+export const BUILD = 42;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
