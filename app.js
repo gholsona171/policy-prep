@@ -89,6 +89,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
 
 async function sync(quiet) {
   if (!signedIn()) return;
+  if (!(await enforceAccess())) return;
   if (!quiet) $('syncmsg').textContent = 'Checking...';
   try {
     await syncAll(store);
@@ -1397,6 +1398,31 @@ async function claimThisDevice() {
   }
 }
 
+/* Revocation reaches the phone. The server has always refused a revoked
+   account per request, but the phone's cache kept working - a revoked
+   customer could study their stale copy indefinitely. Anton's ruling,
+   22 Sep 2026: revoke means REVOKED. On every open and sync, the phone asks
+   the server whether access still stands; a no scrubs everything local -
+   policies, questions, audio, the progress copy - signs the account out,
+   and says plainly on the login screen what happened and who to talk to.
+   Offline fails open, as everywhere: a basement is not a revocation. */
+async function enforceAccess() {
+  try {
+    const state = await rpc('my_access');
+    if (state === 'ok') return true;
+    signOut();
+    localStorage.removeItem(KEY);
+    clearContent().catch(() => {});
+    caches.delete(AUDIO_CACHE).catch(() => {});
+    store = blank();
+    go('auth');
+    $('authmsg').textContent = state === 'expired'
+      ? 'Your access has expired. Renew with the person who sold you access, then sign in again.'
+      : 'Your access has been revoked. If you believe this is a mistake, contact the person who sold you access.';
+    return false;
+  } catch { return true; }
+}
+
 /* A master-set password is temporary by definition: it was read out loud at
    the counter. This walls the next sign-in into choosing a real one. The wall
    is as strong as it needs to be - the menu is hidden on this screen and
@@ -1680,6 +1706,7 @@ sessionStorage.removeItem('policy-prep-recovered');
 
 if (signedIn()) {
   claimThisDevice();   // no await: the server enforces regardless; this just explains
+  enforceAccess();         // revoked means revoked: scrub and say so
   enforceTempPassword();   // a killed app must not dodge the wall on relaunch
   go('home');
   // Paint once from whatever is already on the device, then again once the content
@@ -1700,7 +1727,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 42;
+export const BUILD = 43;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
