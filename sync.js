@@ -22,10 +22,11 @@ export async function pullContent(store) {
   // from a policy whose bank was never written.
   const policies = await dbAll(
     'policies?select=id,title,sort_order,version,body_text,source_ref,track,has_audio,audio_ver&order=sort_order');
-  if (!policies) return false;
-
   const items = await dbAll('policy_items?select=policy_id,item_id,label,type,quote&order=policy_id,item_id');
   const questions = await dbAll('questions?select=id,policy_id,item_id,stem,choices,answer,why,cite,format,min_tier,accept,is_key,chain_id,chain_part&order=policy_id,id');
+  // All three arrive or nothing changes: the store is only touched below this
+  // line, so a pull that fails half way leaves the previous copy whole.
+  if (![policies, items, questions].every(Array.isArray) || !policies.length) return false;
 
   // Passed flags are personal, so keep whatever we already knew and let pullProgress
   // correct it. Losing them here would silently re-lock a policy already cleared.
@@ -216,8 +217,11 @@ export async function pullProgress(store) {
     which at a handful of daily customers would have walked straight through
     the hosting bandwidth allowance. The settings row now carries content_rev,
     bumped by every publish, and content moves only when that number does.
-    Settings and progress are small and stay always-synced. */
-export async function syncAll(store) {
+    Settings and progress are small and stay always-synced.
+
+    Returns true when new content arrived, which is the only time the caller
+    may write content back to the device. */
+export async function syncAll(store, { forceContent = false } = {}) {
   await pushProgress(store);
   let rev = null;
   try {
@@ -225,12 +229,13 @@ export async function syncAll(store) {
     rev = Number(store.settings?.content_rev) || null;
   } catch { /* keep whatever we had */ }
   const have = Number(store.contentRev) || 0;
-  const empty = !store.index.policies.length;
   // No rev (old server, failed settings pull) means pull, because stale
   // content is worse than a large download. A matching rev means skip.
-  if (empty || rev === null || rev !== have) {
-    const ok = await pullContent(store);
-    if (ok && rev !== null) store.contentRev = rev;
+  let pulled = false;
+  if (forceContent || rev === null || rev !== have) {
+    pulled = await pullContent(store);
+    if (pulled) store.contentRev = rev ?? 0;
   }
   await pullProgress(store);
+  return pulled;
 }

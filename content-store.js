@@ -77,10 +77,19 @@ export async function clearContent() {
    reading material is content, not progress, however convenient it was to carry it
    on the same object. */
 
+/* The content revision is stored INSIDE the content record, never beside it.
+   On 4 Nov 2026 a customer's phone held "revision 5" in localStorage while its
+   IndexedDB record had been overwritten with empty banks; the sync trusted the
+   number, skipped every pull, and the phone sat at "questions are still being
+   written" through every refresh. A revision kept with its content can only
+   ever describe content that is actually there: lose one, lose both, re-pull. */
 export function heavyOf(store) {
   const texts = {};
   for (const p of store.index.policies) if (p.text) texts[p.id] = p.text;
-  return { items: store.items, banks: store.banks, practice: store.practice ?? {}, texts };
+  return {
+    items: store.items, banks: store.banks, practice: store.practice ?? {}, texts,
+    contentRev: store.contentRev ?? 0,
+  };
 }
 
 export function lightOf(store) {
@@ -99,13 +108,15 @@ export function lightOf(store) {
     progress: store.progress,
     open: store.open,
     settings: store.settings,
-    contentRev: store.contentRev,
     progressEpoch: store.progressEpoch,
   };
 }
 
-/** Puts the heavy half back onto a store loaded from localStorage. */
+/** Puts the heavy half back onto a store loaded from localStorage. No record,
+    or a record from before the revision lived here, means revision 0: the next
+    sync pulls. */
 export function rejoin(store, heavy) {
+  store.contentRev = Number(heavy?.contentRev) || 0;
   if (!heavy) return store;
   store.items = heavy.items ?? {};
   store.banks = heavy.banks ?? {};

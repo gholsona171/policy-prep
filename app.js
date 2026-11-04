@@ -45,7 +45,11 @@ let S = null;
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...blank(), ...JSON.parse(raw) } : blank();
+    const s = raw ? { ...blank(), ...JSON.parse(raw) } : blank();
+    // Builds up to 43 kept the content revision here. It now lives inside the
+    // content record (see heavyOf), and loadContent is what sets it.
+    delete s.contentRev;
+    return s;
   } catch { return blank(); }
 }
 
@@ -70,36 +74,41 @@ const save = () => {
   }
 };
 
-/* saveContent() is the eighty policies, and only a sync changes them. Keeping it out
-   of save() matters: the content is about 6.5 MB and rewriting that on every answer
-   would drain the battery to store bytes that did not change. */
+/* saveContent() is the eighty policies, and only a sync that actually pulled new
+   content may call it. Writing on every sync is what destroyed a customer's copy
+   on 4 Nov 2026: the sync finished before the boot-time read of IndexedDB did,
+   found the revision current, and wrote the still-empty in-memory store over the
+   good record. */
 const saveContent = () => writeContent(heavyOf(store)).catch((e) => {
   storageWarning = `this phone could not store the policy content (${e.name || e.message})`;
 });
 
 /** Boot-time read of the heavy half. Separate from load() because IndexedDB is async
-    and the home screen should paint from what we already have rather than wait. */
+    and the home screen should paint from what we already have rather than wait.
+    Every sync awaits contentReady, so no sync can run against a half-loaded store. */
 async function loadContent() {
-  try { rejoin(store, await readContent()); } catch { /* next sync refills it */ }
+  try { rejoin(store, await readContent()); } catch { store.contentRev = 0; }
 }
+let contentReady = Promise.resolve();
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /* ------------------------------------------------------------------ sync */
 
-async function sync(quiet) {
+async function sync(quiet, { forceContent = false } = {}) {
   if (!signedIn()) return;
+  await contentReady;
   if (!(await enforceAccess())) return;
-  if (!quiet) $('syncmsg').textContent = 'Checking...';
+  if (!quiet) $('syncmsg').textContent = forceContent ? 'Downloading every policy...' : 'Checking...';
   try {
-    await syncAll(store);
+    const pulled = await syncAll(store, { forceContent });
     applySettings();
     obeyMinBuild();
     if (leaderboardOn()) {
       try { store.leaderboard = await rpc('leaderboard'); } catch { /* board is a nicety */ }
     }
     save();
-    await saveContent();
+    if (pulled) await saveContent();
     renderHome();
     // Says what actually arrived, not just that something did. "Up to date" while
     // sixty five policies had no questions was a true sentence hiding a broken
@@ -1455,10 +1464,13 @@ $('npSave').onclick = async () => {
 };
 
 async function afterSignIn() {
+  // First, before the temporary-password wall can return early: on 4 Nov 2026
+  // the owner reset his own password from the counter, went through the wall,
+  // and landed on a home screen with the master card hidden.
+  checkMaster();
   if (await enforceTempPassword()) { sync(true); return; }
   renderHome();
   go('home');
-  checkMaster();
   await sync(false);
 }
 
@@ -1577,7 +1589,8 @@ async function renderSuggestions() {
   } catch { $('suggestlist').innerHTML = ''; }
 }
 $('extrasback').onclick = () => { renderHome(); go('home'); };
-$('menuresync').onclick = () => { menuOpen(false); sync(false); };
+// The customer's own repair button: whatever the revision says, download it all.
+$('menuresync').onclick = () => { menuOpen(false); sync(false, { forceContent: true }); };
 // A tap anywhere else closes it, the way small menus are expected to behave.
 document.addEventListener('click', (e) => {
   if (!$('menudrop').classList.contains('hide')
@@ -1712,7 +1725,7 @@ if (signedIn()) {
   // Paint once from whatever is already on the device, then again once the content
   // is back from IndexedDB, then the sync paints a third time with the server's copy.
   renderHome();
-  loadContent().then(() => { applySettings(); renderHome(); });
+  contentReady = loadContent().then(() => { applySettings(); renderHome(); });
   checkMaster();
   sync(true);
 } else { go('auth'); }
@@ -1727,7 +1740,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 43;
+export const BUILD = 44;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
