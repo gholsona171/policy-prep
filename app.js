@@ -601,17 +601,29 @@ function openReading(id) {
    phone so every later listen costs no data, and played through MediaSession
    so the lock screen shows the policy and its controls. */
 
-const AUDIO_CACHE = 'policy-prep-audio-v1';
+const AUDIO_CACHE = 'policy-prep-audio-v2';   // sw.js reads this same cache by name
 const AUDIO_KEEP = 12;   // most-recent policies kept on the phone (~60 MB)
 let audioUrl = null;     // the object URL currently loaded into the element
 
+/* The address the player streams from. It is inside the app's own scope, so
+   the service worker answers it straight from this cache, in byte ranges, the
+   way a web server would. Apple's player needs exactly that: fed a blob, an
+   iPad reported "playing" with its clock frozen at 0:00 (beta 47 trace, 6 Nov
+   2026). Nothing here is a shareable link - it only resolves on the device
+   that downloaded the file, and revoking an account deletes the cache.
+
+   The version in the address is the cache-buster: a re-narrated policy carries
+   a higher audio_ver, misses the old entry, downloads fresh, and the trimmer
+   sweeps the stale copy. */
+function listenUrl(id) {
+  const ver = store.index.policies.find((p) => p.id === id)?.audioVer ?? 1;
+  return new URL(`listen/${id}.mp3?v=${ver}`, location.href).href;
+}
+
+/** Makes sure the narration is on the device; returns the cached response. */
 async function cachedAudio(id) {
   const cache = await caches.open(AUDIO_CACHE);
-  // The version in the key is the cache-buster: a re-narrated policy carries a
-  // higher audio_ver, misses the old entry, downloads fresh, and the trimmer
-  // sweeps the stale copy. Without it a phone would keep the old voice forever.
-  const ver = store.index.policies.find((p) => p.id === id)?.audioVer ?? 1;
-  const key = `/audio/${id}.mp3?v=${ver}`;
+  const key = listenUrl(id);
   let res = await cache.match(key);
   if (!res) {
     const token = await authToken();
@@ -625,8 +637,10 @@ async function cachedAudio(id) {
     res = live;
     trimAudioCache(cache);
   }
-  return res.blob();
+  return res;
 }
+// The first audio cache was keyed outside the app's scope; nothing reads it now.
+caches.delete('policy-prep-audio-v1').catch(() => {});
 
 /** Oldest listens leave the phone first, so 80 policies can never quietly
     eat half a gigabyte of somebody's storage. */
@@ -733,32 +747,47 @@ function audioWatchdog(id) {
   }, 12000);
 }
 
+/** The fallback: the whole file as an in-memory, always-typed blob. */
+async function audioInMemory(res) {
+  const bytes = await res.clone().arrayBuffer();
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  audioUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+  return audioUrl;
+}
+
 async function loadAudio(p) {
   const el = $('policyaudio');
   audioTrace = [];
   audioT0 = performance.now();
-  trace(`tap, build ${BUILD}`);
+  // Streaming needs the service worker in charge of this page; on the rare
+  // load where it is not yet, the file is played from memory instead.
+  const streamed = !!navigator.serviceWorker?.controller;
+  trace(`tap, build ${BUILD}, ${streamed ? 'stream' : 'memory'}`);
   el.src = SILENCE;               // still inside the tap: this is the unlock
   el.play().then(() => trace('unlock played'), (e) => trace(`unlock refused ${e.name}`));
   $('audplay').disabled = true;
   $('audmsg').textContent = 'Loading the narration...';
-  let blob;
+  let src;
   try {
-    blob = await cachedAudio(p.id);
-    trace(`file ${blob.size} bytes, type "${blob.type}"`);
-    // Copied into memory: a blob that still points into the Cache API's
-    // storage is one WebKit can stall on without ever raising an error.
-    const bytes = await blob.arrayBuffer();
-    trace('copied to memory');
+    const res = await cachedAudio(p.id);
     if (reading !== p.id) return;  // they left for another policy mid-download
-    if (audioUrl) URL.revokeObjectURL(audioUrl);
-    // Always typed: iOS will not play a blob it cannot identify.
-    audioUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    src = streamed ? listenUrl(p.id) : await audioInMemory(res);
+    trace(streamed ? 'on the device, streaming it' : 'copied to memory');
   } catch (e) {
     trace(`fetch failed ${e.message}`);
     $('audmsg').textContent = e.message;
     $('audplay').disabled = false;
     return;
+  }
+  // A stream that fails before a single sound (an old worker still in charge
+  // that does not know the listen/ address) falls back to memory, once.
+  if (streamed) {
+    el.addEventListener('error', async () => {
+      if (audioFor !== p.id || audioPlayingFrom !== null) return;
+      trace('stream failed, playing from memory');
+      el.src = await audioInMemory(await cachedAudio(p.id));
+      el.play().catch(() => {});
+    }, { once: true });
   }
   // Play is called straight away, never after waiting for metadata: iOS does
   // not read a file's length until play() has been called (beta 45 hung on it).
@@ -768,7 +797,8 @@ async function loadAudio(p) {
     // Pick up where this policy was left off, like an audiobook, backed up a breath.
     el.addEventListener('loadedmetadata', () => { el.currentTime = pos - 3; }, { once: true });
   }
-  el.src = audioUrl;
+  el.pause();                     // the unlocking silence stops before the swap
+  el.src = src;
   el.defaultPlaybackRate = el.playbackRate = audioSpeed();
   audioSession(p);
   $('audmsg').textContent = LISTEN_HINT;
@@ -1994,7 +2024,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 47;
+export const BUILD = 48;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
