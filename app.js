@@ -1837,6 +1837,9 @@ async function renderSuggestions() {
 $('extrasback').onclick = () => { renderHome(); go('home'); };
 // The customer's own repair button: whatever the revision says, download it all.
 $('menuresync').onclick = () => { menuOpen(false); sync(false, { forceContent: true }); };
+// Opened in the same window, so on a home-screen install it tests the
+// home-screen player, which is where an iPad's narration froze (Nov 2026).
+$('menusound').onclick = () => { menuOpen(false); location.href = 'soundcheck/'; };
 // A tap anywhere else closes it, the way small menus are expected to behave.
 document.addEventListener('click', (e) => {
   if (!$('menudrop').classList.contains('hide')
@@ -2024,7 +2027,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 48;
+export const BUILD = 49;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {

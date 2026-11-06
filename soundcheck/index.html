@@ -5,76 +5,161 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Policy Prep sound check</title>
 <style>
-  :root{--bg:#0f1218;--panel:#171b23;--line:#2a303b;--ink:#e8ebf0;--dim:#97a1b0;--ok:#3ecf8e;--bad:#ef6461}
+  :root{--bg:#0f1218;--panel:#171b23;--line:#2a303b;--ink:#e8ebf0;--dim:#97a1b0;--ok:#3ecf8e;--bad:#ef6461;--accent:#5aa9ff}
   body{margin:0;background:var(--bg);color:var(--ink);
     font:16px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif}
   .wrap{max-width:640px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) 16px 28px}
   h1{font-size:19px;margin:0 0 4px}
   p{color:var(--dim);font-size:14px;margin:0 0 16px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
-  .card b{display:block;margin-bottom:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:10px}
+  .card b{display:block;margin-bottom:8px;font-size:15px}
   audio{width:100%}
-  .clock{font-variant-numeric:tabular-nums;color:var(--dim);font-size:14px;margin-top:8px}
+  button{font:inherit;border:0;border-radius:11px;padding:12px 16px;background:var(--accent);
+    color:#06101d;font-weight:600;width:100%;cursor:pointer}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:500;margin-top:6px}
+  .verdict{font-variant-numeric:tabular-nums;color:var(--dim);font-size:14px;margin-top:8px}
   .ok{color:var(--ok)} .bad{color:var(--bad)}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Sound check</h1>
-  <p>Apple's own player, no app code. Press play on each one. A working player's clock
-    counts up and you hear it. Each result is sent to the developer automatically.</p>
+  <p>Each test plays the same short tone a different way. Tap them one at a time and wait
+    for the green or red line. Results are sent to the developer automatically when you
+    are signed in. <span id="ctx"></span></p>
 
-  <div class="card"><b>1. Test tone, same format as the narration</b>
-    <audio controls preload="metadata" data-name="tone 24k mono" src="tone-24k-mono.mp3"></audio>
-    <div class="clock">not started</div></div>
+  <div class="card"><b>A. Apple's player, plain web address</b>
+    <audio controls preload="metadata" id="a" src="tone-24k-mono.mp3"></audio>
+    <div class="verdict" id="va">press play above</div></div>
 
-  <div class="card"><b>2. Test tone, standard music format</b>
-    <audio controls preload="metadata" data-name="tone 44k stereo" src="tone-44k-stereo.mp3"></audio>
-    <div class="clock">not started</div></div>
+  <div class="card"><b>B. Started by the app, plain web address</b>
+    <button id="bb">Play B</button><div class="verdict" id="vb"></div></div>
 
-  <div class="card"><b>3. Policy 22.02, from this device's saved copy</b>
-    <audio controls preload="metadata" data-name="22-02 listen" src="../listen/22-02.mp3?v=2"></audio>
-    <div class="clock">not started</div></div>
+  <div class="card"><b>C. Started by the app, in-memory copy</b>
+    <button id="bc">Play C</button><div class="verdict" id="vc"></div></div>
+
+  <div class="card"><b>D. Started by the app, saved-copy address</b>
+    <button id="bd">Play D</button><div class="verdict" id="vd"></div></div>
+
+  <div class="card"><b>E. The app's exact start: unlock, then swap</b>
+    <button id="be">Play E</button><div class="verdict" id="ve"></div></div>
+
+  <button class="ghost" id="stop">Stop all</button>
+  <button class="ghost" id="back">Back to Policy Prep</button>
 </div>
 <script type="module">
-/* A diagnostic for one iPad that reports "playing" with a frozen clock
-   (6 Nov 2026). Each native player that is started is checked five seconds
-   later; whether its clock moved goes to client_errors with the device. */
+/* Diagnostic for an iPad that reports "playing" with a frozen clock in the app
+   (6 Nov 2026) while Apple's own player plays the same format in Safari.
+   Each test isolates one difference between the two: who presses play, and
+   how the file is handed over. Opened from the app's menu it runs in the
+   home-screen window, which is where the fault lives. */
 import { db, signedIn, currentUserId } from '../supa.js';
 
-const BUILD = 48;   // the app build this page was shipped beside
+const BUILD = 49;
+const TONE = new URL('tone-24k-mono.mp3', location.href).href;
+const AUDIO_CACHE = 'policy-prep-audio-v2';
+const LISTEN = new URL('../listen/soundcheck-tone.mp3?v=1', location.href).href;
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+document.getElementById('ctx').textContent = standalone ? '(running inside the app)' : '(running in a browser tab)';
 
 const report = (message) => {
   if (!signedIn()) return;
   db('client_errors', { method: 'POST', prefer: 'return=minimal',
-    body: { user_id: currentUserId(), build: BUILD, message, stack: '',
+    body: { user_id: currentUserId(), build: BUILD, message: message.slice(0, 500),
+      stack: `standalone=${standalone} controlled=${!!navigator.serviceWorker?.controller}`,
       ua: navigator.userAgent.slice(0, 300) } }).catch(() => {});
 };
 
-for (const el of document.querySelectorAll('audio')) {
-  const clock = el.nextElementSibling;
-  const show = () => { if (el.dataset.verdict) return; clock.textContent = `clock ${el.currentTime.toFixed(1)} s of ${Number.isFinite(el.duration) ? el.duration.toFixed(0) : '?'}`; };
-  ['timeupdate', 'loadedmetadata', 'playing', 'pause'].forEach((ev) => el.addEventListener(ev, show));
+const players = [];
+function judge(el, name, out) {
+  players.push(el);
+  out.textContent = 'starting...';
+  let from = null;
+  el.addEventListener('playing', () => { if (from === null) from = el.currentTime; }, { once: true });
   el.addEventListener('error', () => {
-    clock.innerHTML = `<span class="bad">could not load (error ${el.error?.code})</span>`;
-    report(`soundcheck ${el.dataset.name}: load error ${el.error?.code}`);
-  });
-  let checked = false;
-  el.addEventListener('playing', () => {
-    if (checked) return;
-    checked = true;
-    const from = el.currentTime;
-    setTimeout(() => {
-      const moved = el.currentTime - from;
-      const ok = moved > 2;
-      el.dataset.verdict = ok ? 'working' : 'frozen';
-      clock.innerHTML = `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'working' : 'clock frozen'}</span>`
-        + ` - moved ${moved.toFixed(1)} s in 5 s`;
-      report(`soundcheck ${el.dataset.name}: ${ok ? 'WORKING' : 'FROZEN'} moved ${moved.toFixed(1)}s`
-        + ` paused=${el.paused} ready=${el.readyState}`);
-    }, 5000);
-  });
+    out.innerHTML = `<span class="bad">could not load (error ${el.error?.code})</span>`;
+    report(`soundcheck2 ${name}: load error ${el.error?.code}`);
+  }, { once: true });
+  setTimeout(() => {
+    if (out.textContent.startsWith('could not')) return;
+    const moved = from === null ? 0 : el.currentTime - from;
+    const ok = moved > 2;
+    out.innerHTML = `<span class="${ok ? 'ok' : 'bad'}">${ok ? 'working' : 'clock frozen'}</span>`
+      + ` - moved ${moved.toFixed(1)} s in 5 s${from === null ? ', never reported playing' : ''}`;
+    report(`soundcheck2 ${name}: ${ok ? 'WORKING' : 'FROZEN'} moved ${moved.toFixed(1)}s`
+      + ` playing=${from !== null} paused=${el.paused} ready=${el.readyState}`);
+  }, 6000);
 }
+const start = (el, name, out) => {
+  judge(el, name, out);
+  el.play().catch((e) => {
+    out.innerHTML = `<span class="bad">refused: ${e.name}</span>`;
+    report(`soundcheck2 ${name}: play refused ${e.name}`);
+  });
+};
+
+// A: the native control, judged once someone presses its play button.
+{
+  const el = document.getElementById('a');
+  const out = document.getElementById('va');
+  let armed = false;
+  el.addEventListener('play', () => { if (!armed) { armed = true; judge(el, 'A native url', out); } });
+}
+
+document.getElementById('bb').onclick = () => {
+  start(new Audio(TONE), 'B js url', document.getElementById('vb'));
+};
+
+let toneBytes = null;
+const tone = async () => (toneBytes ??= await (await fetch(TONE)).arrayBuffer());
+tone();   // fetched ahead so C and E start inside the tap
+
+document.getElementById('bc').onclick = async () => {
+  const el = new Audio();
+  el.src = URL.createObjectURL(new Blob([await tone()], { type: 'audio/mpeg' }));
+  start(el, 'C js blob', document.getElementById('vc'));
+};
+
+document.getElementById('bd').onclick = async () => {
+  const out = document.getElementById('vd');
+  if (!navigator.serviceWorker?.controller) {
+    out.innerHTML = '<span class="bad">the app\'s helper is not running on this page</span>';
+    report('soundcheck2 D: no service worker controller');
+    return;
+  }
+  const cache = await caches.open(AUDIO_CACHE);
+  if (!(await cache.match(LISTEN))) {
+    await cache.put(LISTEN, new Response(await tone(), { headers: { 'Content-Type': 'audio/mpeg' } }));
+  }
+  start(new Audio(LISTEN), 'D js listen', out);
+};
+
+// E: exactly what the app does - a silent WAV played inside the tap, then the
+// real source swapped in on the same element.
+const SILENCE = (() => {
+  const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer);
+  const tag = (at, s) => { for (let i = 0; i < s.length; i++) b[at + i] = s.charCodeAt(i); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + n, true); tag(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  tag(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+})();
+document.getElementById('be').onclick = async () => {
+  const el = new Audio();
+  el.src = SILENCE;
+  el.play().catch(() => {});
+  const url = URL.createObjectURL(new Blob([await tone()], { type: 'audio/mpeg' }));
+  el.pause();
+  el.src = url;
+  start(el, 'E unlock+swap', document.getElementById('ve'));
+};
+
+document.getElementById('stop').onclick = () => {
+  players.forEach((el) => el.pause());
+  document.getElementById('a').pause();
+};
+document.getElementById('back').onclick = () => { location.href = '../'; };
 </script>
 </body>
 </html>

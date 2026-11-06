@@ -1,7 +1,7 @@
 /* Offline shell: caches the app itself. Policy text and questions live in
    IndexedDB (content-store.js); downloaded narration lives in AUDIO_CACHE and is
    streamed from here (see listen below). Bump CACHE to force an update. */
-const CACHE = 'policy-prep-b48';
+const CACHE = 'policy-prep-b49';
 const SHELL = ['./', 'index.html', 'app.js', 'engine.js', 'supa.js', 'sync.js', 'config.js',
   'content-store.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
