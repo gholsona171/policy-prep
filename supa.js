@@ -137,13 +137,13 @@ export async function rpc(name, args = {}) {
     file comes back through a database function that checks live access on every
     single request, so cancelling somebody closes the documents in the same
     instant. Nothing durable is handed out. */
-export async function policyPdfUrl(policyId) {
+export async function policyPdfBytes(policyId) {
   const base64 = await rpc('get_policy_pdf', { p_policy_id: policyId });
   if (typeof base64 !== 'string' || !base64) throw new Error('that policy has no PDF on file');
   const bin = atob(base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  return bytes;
 }
 
 /** REST helper. `path` is everything after /rest/v1/, e.g. "questions?select=*". */

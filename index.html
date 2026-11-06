@@ -61,6 +61,14 @@
   .keylist div:last-child{border-bottom:0}
   .bad{color:var(--bad)} .good{color:var(--ok)}
   button.small{width:auto;padding:9px 14px;font-size:13px}
+  #audseek{width:100%;margin:0;height:30px;accent-color:var(--accent)}
+  .audtimes{justify-content:space-between;font-size:12px;color:var(--dim);
+    font-variant-numeric:tabular-nums;margin-top:0}
+  .audctl{display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr 1fr;gap:8px}
+  .audctl button{padding:12px 4px;font-size:14px}
+  .pdfbar{margin-bottom:8px}
+  #pdfpages{margin:10px 0}
+  #pdfpages img{display:block;width:100%;height:auto;background:#fff;border-radius:6px;margin-bottom:10px}
   input[type=email],input[type=password],input[type=text],input[type=number],select{width:100%;background:#141821;
     color:var(--ink);border:1px solid var(--line);border-radius:11px;padding:14px;font:16px/1.3 inherit}
   input:focus,select:focus{outline:none;border-color:var(--accent)}
@@ -353,23 +361,39 @@
     <h1 id="readtitle"></h1>
     <p class="sub" id="readsource"></p>
     <div class="card stack hide" id="listencard">
-      <div class="row">
-        <button id="audioplay" style="flex:1">Listen to this policy</button>
-        <button id="audiospeed" class="small ghost">1x</button>
+      <div class="mini">Listen to this policy</div>
+      <input type="range" id="audseek" min="0" max="0" step="1" value="0" disabled
+        aria-label="Position in the narration">
+      <div class="row audtimes"><span id="audcur">0:00</span><span id="auddur">--:--</span></div>
+      <div class="audctl">
+        <button id="audback" class="ghost" aria-label="Back 15 seconds">-15s</button>
+        <button id="audplay">Play</button>
+        <button id="audstop" class="ghost">Stop</button>
+        <button id="audfwd" class="ghost" aria-label="Forward 30 seconds">+30s</button>
+        <button id="audspeed" class="ghost" aria-label="Playback speed">1x</button>
       </div>
-      <div class="meta" id="audiomsg">Keeps playing with your screen locked -
-        pocket the phone and go.</div>
+      <div class="meta" id="audmsg"></div>
     </div>
-    <audio id="policyaudio" preload="none"></audio>
+    <audio id="policyaudio" preload="auto" playsinline></audio>
     <div class="card">
       <div class="policy" id="readbody"></div>
     </div>
     <div class="card stack">
       <button id="readpdf" class="ghost">Open the original PDF</button>
-      <div class="meta" id="pdfmsg"></div>
       <button id="readtest">Take the test on this</button>
       <button id="readback" class="ghost">Back</button>
     </div>
+  </div>
+
+  <!-- The department's PDF, drawn page by page inside the app. -->
+  <div id="pdf" class="hide">
+    <div class="row pdfbar">
+      <button id="pdfback" class="small ghost">Back</button>
+      <div class="meta" id="pdftitle" style="flex:1"></div>
+    </div>
+    <div class="meta" id="pdfstatus"></div>
+    <div id="pdfpages"></div>
+    <button id="pdfback2" class="ghost">Back to the policy</button>
   </div>
 
   <div id="extras" class="hide">

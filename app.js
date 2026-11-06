@@ -2,7 +2,7 @@ import {
   buildSession, coverage, gate, policyStats, itemStats,
 } from './engine.js';
 import {
-  signIn, signUp, signOut, signedIn, currentEmail, currentUserId, rpc, policyPdfUrl, db,
+  signIn, signUp, signOut, signedIn, currentEmail, currentUserId, rpc, policyPdfBytes, db,
   changePassword, deviceId, deviceLabel, authToken,
 } from './supa.js';
 import { syncAll } from './sync.js';
@@ -18,7 +18,7 @@ const KEY = 'policy-prep-v1';
 const $ = (id) => document.getElementById(id);
 const show = (id) => $(id).classList.remove('hide');
 const hide = (id) => $(id).classList.add('hide');
-const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'settings', 'practice', 'extras', 'suggest', 'newpass'];
+const screens = ['auth', 'home', 'quiz', 'result', 'stats', 'read', 'pdf', 'settings', 'practice', 'extras', 'suggest', 'newpass'];
 // The screen Settings was opened from, so its Back button can undo the trip.
 let cameFrom = 'home';
 const go = (name) => {
@@ -588,7 +588,6 @@ function openReading(id) {
   $('readsource').textContent = p.source || '';
   $('readbody').textContent = p.text;
   $('readtest').textContent = p.passed ? 'Revise this one' : 'Take the test on this';
-  $('pdfmsg').textContent = '';
   armAudio(p);
   markRead(id);
   go('read');
@@ -648,87 +647,247 @@ async function trimAudioCache(cache) {
 }
 
 const AUDIO_SPEEDS = [1, 1.25, 1.5, 0.75];
+const SKIP_BACK = 15;
+const SKIP_FWD = 30;
+let audioFor = null;   // the policy whose narration is loaded into the element
+let seeking = false;   // a finger is on the slider; the clock must not fight it
 
+const audioSpeed = () => AUDIO_SPEEDS[Number(prefs().audioSpeed) || 0] ?? 1;
+const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+const LISTEN_HINT = 'Keeps playing with your screen locked - pocket the phone and go.';
+
+/* iOS lets a page start sound only inside the tap itself. The first player
+   downloaded the narration and THEN called play(); with no cached copy the
+   download outlasted the tap, Safari refused, and an iPad's Now Playing card
+   sat on "Not Playing" (Anton, 6 Nov 2026). A sliver of silence played inside
+   the tap unlocks this element for good, so the real file can arrive whenever
+   it arrives. */
+const SILENCE = (() => {
+  const n = 800;
+  const b = new Uint8Array(44 + n);
+  const v = new DataView(b.buffer);
+  const tag = (at, s) => { for (let i = 0; i < s.length; i++) b[at + i] = s.charCodeAt(i); };
+  tag(0, 'RIFF'); v.setUint32(4, 36 + n, true); tag(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true);
+  v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  tag(36, 'data'); v.setUint32(40, n, true); b.fill(128, 44);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+})();
+
+/** Opening a policy's reading screen. Reopening the one already playing
+    leaves it playing; any other policy stops it and starts the card fresh. */
 function armAudio(p) {
+  $('listencard').classList.toggle('hide', p.hasAudio !== true);
+  $('audspeed').textContent = `${audioSpeed()}x`;
+  if (audioFor === p.id) { paintAudio(); return; }
   const el = $('policyaudio');
   el.pause();
-  if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
   el.removeAttribute('src');
-  $('listencard').classList.toggle('hide', p.hasAudio !== true);
-  if (p.hasAudio !== true) return;
-  $('audioplay').textContent = 'Listen to this policy';
-  $('audioplay').disabled = false;
-  $('audiomsg').textContent = 'Keeps playing with your screen locked - pocket the phone and go.';
+  el.load();
+  if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+  audioFor = null;
+  $('audmsg').textContent = LISTEN_HINT;
+  paintAudio();
 }
 
-async function playAudio() {
+/** One function draws the whole card from the element's real state. */
+function paintAudio() {
+  const el = $('policyaudio');
+  const loaded = audioFor !== null && audioFor === reading && el.duration > 0;
+  $('audplay').textContent = loaded && !el.paused ? 'Pause'
+    : loaded && el.currentTime > 1 ? 'Resume' : 'Play';
+  for (const id of ['audseek', 'audback', 'audfwd', 'audstop']) $(id).disabled = !loaded;
+  $('audseek').max = String(loaded ? Math.floor(el.duration) : 0);
+  if (!seeking) $('audseek').value = String(loaded ? Math.floor(el.currentTime) : 0);
+  $('audcur').textContent = clock(seeking ? Number($('audseek').value) : loaded ? el.currentTime : 0);
+  $('auddur').textContent = loaded ? clock(el.duration) : '--:--';
+}
+
+async function loadAudio(p) {
+  const el = $('policyaudio');
+  el.src = SILENCE;               // still inside the tap: this is the unlock
+  el.play().catch(() => {});
+  $('audplay').disabled = true;
+  $('audmsg').textContent = 'Loading the narration...';
+  try {
+    const blob = await cachedAudio(p.id);
+    if (reading !== p.id) return;  // they left for another policy mid-download
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(blob);
+    await new Promise((resolve, reject) => {
+      el.addEventListener('loadedmetadata', resolve, { once: true });
+      el.addEventListener('error', () => reject(new Error('This device could not play the narration.')),
+        { once: true });
+      el.src = audioUrl;
+      el.load();
+    });
+    audioFor = p.id;
+    el.defaultPlaybackRate = el.playbackRate = audioSpeed();
+    // Pick up where this policy was left off, like an audiobook, backed up a breath.
+    const pos = Number((prefs().audioPos ?? {})[p.id]) || 0;
+    if (pos > 5) el.currentTime = pos - 3;
+    audioSession(p);
+    $('audmsg').textContent = LISTEN_HINT;
+    try { await el.play(); } catch { $('audmsg').textContent = 'Ready. Tap Play to start.'; }
+  } catch (e) {
+    $('audmsg').textContent = e.message;
+  } finally {
+    $('audplay').disabled = false;
+    paintAudio();
+  }
+}
+
+function audioPlayPause() {
   const p = store.index.policies.find((x) => x.id === reading);
   if (!p) return;
   const el = $('policyaudio');
-
-  if (el.src && !el.paused) { el.pause(); return; }
-  if (el.src) { el.play(); return; }
-
-  $('audioplay').disabled = true;
-  $('audioplay').textContent = 'Loading...';
-  try {
-    const blob = await cachedAudio(p.id);
-    audioUrl = URL.createObjectURL(blob);
-    el.src = audioUrl;
-    // Pick up where this policy was left off, like an audiobook.
-    const pos = Number((prefs().audioPos ?? {})[p.id]) || 0;
-    if (pos > 5) el.currentTime = pos - 3;   // back up a breath
-    el.playbackRate = AUDIO_SPEEDS[Number(prefs().audioSpeed) || 0] ?? 1;
-
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: p.title, artist: 'Policy Prep',
-        artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }],
-      });
-      navigator.mediaSession.setActionHandler('play', () => el.play());
-      navigator.mediaSession.setActionHandler('pause', () => el.pause());
-      navigator.mediaSession.setActionHandler('seekbackward', () => { el.currentTime -= 15; });
-      navigator.mediaSession.setActionHandler('seekforward', () => { el.currentTime += 30; });
-    }
-    await el.play();
-  } catch (e) {
-    $('audiomsg').textContent = e.message;
-    $('audioplay').textContent = 'Listen to this policy';
-  }
-  $('audioplay').disabled = false;
+  if (audioFor !== p.id) { loadAudio(p); return; }
+  if (el.paused) el.play().catch((e) => { $('audmsg').textContent = e.message; });
+  else el.pause();
 }
 
-function audioTick() {
+function audioSkip(seconds) {
   const el = $('policyaudio');
-  if (!reading || !el.duration) return;
-  const pos = { ...(prefs().audioPos ?? {}) };
-  // Finished (or nearly) forgets the position; anything else remembers it.
-  if (el.currentTime > el.duration - 20) delete pos[reading];
-  else pos[reading] = Math.floor(el.currentTime);
-  setPref('audioPos', pos);
-  const m = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-  $('audiomsg').textContent = `${m(el.currentTime)} of ${m(el.duration)}`;
+  if (!(el.duration > 0)) return;
+  el.currentTime = Math.min(Math.max(0, el.currentTime + seconds), el.duration - 0.5);
+  paintAudio();
 }
 
-/** The department's own document, laid out the way they laid it out. Fetched
-    on demand and turned into a file locally, so nothing durable is handed out
-    and cancelling an account closes it immediately. Needs a live connection:
-    the text above works offline, the PDF does not. */
+/** Stop is pause plus back to the start, and the saved place is forgotten. */
+function audioStop() {
+  const el = $('policyaudio');
+  el.pause();
+  if (el.duration > 0) el.currentTime = 0;
+  if (audioFor) {
+    const pos = { ...(prefs().audioPos ?? {}) };
+    delete pos[audioFor];
+    setPref('audioPos', pos);
+  }
+  paintAudio();
+}
+
+function audioRemember() {
+  const el = $('policyaudio');
+  if (!audioFor || !(el.duration > 0)) return;
+  const pos = { ...(prefs().audioPos ?? {}) };
+  // Finished (or nearly) forgets the place; anything else remembers it.
+  if (el.currentTime > el.duration - 20) delete pos[audioFor];
+  else pos[audioFor] = Math.floor(el.currentTime);
+  setPref('audioPos', pos);
+}
+
+/** The lock screen and Control Center: title, play/pause, stop, skips, and a
+    scrubber that moves because the position is reported to it. */
+function audioSession(p) {
+  if (!('mediaSession' in navigator)) return;
+  const el = $('policyaudio');
+  const ms = navigator.mediaSession;
+  ms.metadata = new MediaMetadata({
+    title: p.title, artist: 'Policy Prep', album: 'Detroit Police Department',
+    artwork: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png' }],
+  });
+  const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* unsupported here */ } };
+  on('play', () => el.play());
+  on('pause', () => el.pause());
+  on('stop', () => audioStop());
+  on('seekbackward', (d) => audioSkip(-(d.seekOffset || SKIP_BACK)));
+  on('seekforward', (d) => audioSkip(d.seekOffset || SKIP_FWD));
+  on('seekto', (d) => { el.currentTime = d.seekTime; paintAudio(); });
+}
+
+function audioPosition() {
+  if (!('mediaSession' in navigator)) return;
+  const el = $('policyaudio');
+  try {
+    navigator.mediaSession.playbackState = audioFor && !el.paused ? 'playing' : 'paused';
+    if (audioFor && el.duration > 0 && navigator.mediaSession.setPositionState) {
+      navigator.mediaSession.setPositionState({
+        duration: el.duration, playbackRate: el.playbackRate,
+        position: Math.min(el.currentTime, el.duration),
+      });
+    }
+  } catch { /* a lock screen that cannot show position is not worth a crash */ }
+}
+
+/* The department's own document, drawn inside the app. It used to be handed
+   to window.open as a file, which iOS blocks once a download sits between the
+   tap and the open - on an iPad the button did nothing (Anton, 6 Nov 2026).
+   PDF.js draws each page right here, identically on every phone; it ships with
+   the app in vendor/pdfjs and loads only the first time a PDF is opened. The
+   file comes live through get_policy_pdf, so cancelling an account closes it
+   at once, and nothing durable is handed out. */
+let pdfjs = null;
+let pdfJob = 0;   // a newer open, or leaving the screen, cancels a drawing in progress
+
+async function loadPdfjs() {
+  if (!pdfjs) {
+    const lib = await import('./vendor/pdfjs/pdf.min.js');
+    lib.GlobalWorkerOptions.workerSrc = new URL('vendor/pdfjs/pdf.worker.min.js', location.href).href;
+    pdfjs = lib;
+  }
+  return pdfjs;
+}
+
+function clearPdfPages() {
+  for (const img of $('pdfpages').querySelectorAll('img')) URL.revokeObjectURL(img.src);
+  $('pdfpages').replaceChildren();
+}
+
 async function openPdf() {
   if (!reading) return;
-  const btn = $('readpdf');
-  btn.disabled = true;
-  $('pdfmsg').textContent = 'Fetching...';
+  const id = reading;
+  const job = ++pdfJob;
+  clearPdfPages();
+  $('pdftitle').textContent = store.index.policies.find((x) => x.id === id)?.title ?? '';
+  $('pdfstatus').textContent = 'Fetching the PDF...';
+  go('pdf');
+  let doc = null;
   try {
-    const url = await policyPdfUrl(reading);
-    $('pdfmsg').textContent = '';
-    window.open(url, '_blank');
+    const [bytes, lib] = await Promise.all([policyPdfBytes(id), loadPdfjs()]);
+    if (job !== pdfJob) return;
+    doc = await lib.getDocument({
+      data: bytes, standardFontDataUrl: new URL('vendor/pdfjs/standard_fonts/', location.href).href,
+    }).promise;
+    // Pages are drawn one at a time on a single canvas and kept as JPEG images:
+    // a stack of live full-resolution canvases is what makes iOS kill a tab.
+    const canvas = document.createElement('canvas');
+    const width = $('pdfpages').clientWidth || 600;
+    const sharp = Math.min(window.devicePixelRatio || 1, 2);
+    for (let n = 1; n <= doc.numPages && job === pdfJob; n++) {
+      $('pdfstatus').textContent = `Drawing page ${n} of ${doc.numPages}...`;
+      const page = await doc.getPage(n);
+      const viewport = page.getViewport({ scale: (width / page.getViewport({ scale: 1 }).width) * sharp });
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+      page.cleanup();
+      if (job !== pdfJob || !blob) break;
+      const img = new Image();
+      img.alt = `Page ${n}`;
+      img.src = URL.createObjectURL(blob);
+      $('pdfpages').append(img);
+    }
+    canvas.width = canvas.height = 0;
+    if (job === pdfJob) {
+      $('pdfstatus').textContent = `${doc.numPages} page${doc.numPages === 1 ? '' : 's'}. Pinch to zoom.`;
+    }
   } catch (e) {
-    $('pdfmsg').textContent = navigator.onLine
-      ? e.message
-      : 'The PDF needs a connection. The text above works offline.';
+    if (job === pdfJob) {
+      $('pdfstatus').textContent = navigator.onLine
+        ? `Could not open the PDF: ${e.message}`
+        : 'The PDF needs a connection. The policy text works offline.';
+    }
+  } finally {
+    doc?.destroy();
   }
-  btn.disabled = false;
+}
+
+function closePdf() {
+  pdfJob++;
+  clearPdfPages();
+  go('read');
 }
 
 /** Starting a section from its own card. The policy in focus keeps the normal
@@ -1599,18 +1758,36 @@ document.addEventListener('click', (e) => {
 $('statsback').onclick = () => { renderHome(); go('home'); };
 $('readback').onclick = () => { renderHome(); go('home'); };
 $('readtest').onclick = () => startSection(reading);
-$('audioplay').onclick = () => playAudio();
-$('audiospeed').onclick = function () {
+$('audplay').onclick = () => audioPlayPause();
+$('audback').onclick = () => audioSkip(-SKIP_BACK);
+$('audfwd').onclick = () => audioSkip(SKIP_FWD);
+$('audstop').onclick = () => audioStop();
+$('audspeed').onclick = () => {
   const i = ((Number(prefs().audioSpeed) || 0) + 1) % AUDIO_SPEEDS.length;
   setPref('audioSpeed', i);
-  this.textContent = `${AUDIO_SPEEDS[i]}x`;
-  $('policyaudio').playbackRate = AUDIO_SPEEDS[i];
+  const el = $('policyaudio');
+  el.defaultPlaybackRate = el.playbackRate = AUDIO_SPEEDS[i];
+  $('audspeed').textContent = `${AUDIO_SPEEDS[i]}x`;
 };
-$('policyaudio').addEventListener('timeupdate', audioTick);
-$('policyaudio').addEventListener('play', () => { $('audioplay').textContent = 'Pause'; });
-$('policyaudio').addEventListener('pause', () => { $('audioplay').textContent = 'Resume'; });
-$('policyaudio').addEventListener('ended', () => { $('audioplay').textContent = 'Listen again'; });
+// Dragging shows where you would land; letting go is the jump.
+$('audseek').addEventListener('input', () => { seeking = true; paintAudio(); });
+$('audseek').addEventListener('change', () => {
+  const el = $('policyaudio');
+  if (el.duration > 0) el.currentTime = Number($('audseek').value);
+  seeking = false;
+  paintAudio();
+});
+for (const ev of ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange', 'seeked', 'ratechange']) {
+  $('policyaudio').addEventListener(ev, () => { paintAudio(); audioPosition(); });
+}
+$('policyaudio').addEventListener('timeupdate', () => {
+  if (!audioFor) return;   // the unlocking silence is nobody's position
+  audioRemember();
+  paintAudio();
+});
 $('readpdf').onclick = () => openPdf();
+$('pdfback').onclick = () => closePdf();
+$('pdfback2').onclick = () => closePdf();
 $('start').onclick = () => start();
 // Deliberately follows the normal sequence rather than repeating the last focus: after
 // passing, "another session" should move you on, not park you on finished material.
@@ -1740,7 +1917,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 44;
+export const BUILD = 45;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
