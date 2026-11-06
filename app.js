@@ -704,44 +704,84 @@ function paintAudio() {
   $('auddur').textContent = loaded ? clock(el.duration) : '--:--';
 }
 
+/* Every step of a start is written down. If sound has not begun twelve
+   seconds after the tap, the whole trace goes to client_errors: beta 46 sat
+   silent on Anton's iPad without a single error to read, because nothing
+   failed - a play() promise simply never settled. */
+let audioTrace = [];
+let audioT0 = 0;
+const trace = (step) => { audioTrace.push(`${Math.round(performance.now() - audioT0)}ms ${step}`); };
+
+let audioPausedByUser = 0;   // bumped by every deliberate pause or stop
+// Where real playback began, set by the element's own 'playing' and 'seeked'
+// events. Jumps (resuming a saved place, skips) move the clock without any
+// sound, so only time advanced past this mark counts as playing.
+let audioPlayingFrom = null;
+
+function audioWatchdog(id) {
+  const el = $('policyaudio');
+  const pauses = audioPausedByUser;
+  audioPlayingFrom = null;
+  setTimeout(() => {
+    const progressed = audioPlayingFrom !== null && el.currentTime - audioPlayingFrom > 0.5;
+    // Played, someone paused on purpose, or they moved on: not a stall.
+    if (audioFor !== id || audioPausedByUser !== pauses || progressed) return;
+    trace(`watchdog: paused=${el.paused} t=${el.currentTime.toFixed(1)} ready=${el.readyState}`
+      + ` net=${el.networkState} err=${el.error?.code ?? '-'} dur=${el.duration}`);
+    $('audmsg').textContent = 'The narration has not started. A report has been sent - tap Play to try again.';
+    reportError(`audio did not start on ${id}`, audioTrace.join('\n'));
+  }, 12000);
+}
+
 async function loadAudio(p) {
   const el = $('policyaudio');
+  audioTrace = [];
+  audioT0 = performance.now();
+  trace(`tap, build ${BUILD}`);
   el.src = SILENCE;               // still inside the tap: this is the unlock
-  el.play().catch(() => {});
+  el.play().then(() => trace('unlock played'), (e) => trace(`unlock refused ${e.name}`));
   $('audplay').disabled = true;
   $('audmsg').textContent = 'Loading the narration...';
+  let blob;
   try {
-    const blob = await cachedAudio(p.id);
+    blob = await cachedAudio(p.id);
+    trace(`file ${blob.size} bytes, type "${blob.type}"`);
+    // Copied into memory: a blob that still points into the Cache API's
+    // storage is one WebKit can stall on without ever raising an error.
+    const bytes = await blob.arrayBuffer();
+    trace('copied to memory');
     if (reading !== p.id) return;  // they left for another policy mid-download
     if (audioUrl) URL.revokeObjectURL(audioUrl);
-    // iOS will not play a blob it cannot identify, and a blob read back from
-    // the Cache API can arrive with no type at all.
-    audioUrl = URL.createObjectURL(new Blob([blob], { type: 'audio/mpeg' }));
-    // Play is called straight away, never after waiting for metadata: iOS
-    // does not read a file's length until play() has been called, so a player
-    // that waited first (beta 45) sat on "Loading" forever on an iPad.
-    audioFor = p.id;
-    const pos = Number((prefs().audioPos ?? {})[p.id]) || 0;
-    if (pos > 5) {
-      // Pick up where this policy was left off, like an audiobook, backed up a breath.
-      el.addEventListener('loadedmetadata', () => { el.currentTime = pos - 3; }, { once: true });
-    }
-    el.src = audioUrl;
-    el.defaultPlaybackRate = el.playbackRate = audioSpeed();
-    audioSession(p);
-    $('audmsg').textContent = LISTEN_HINT;
-    // If the device still refuses, the element is loaded and the next tap on
-    // Play is a direct gesture on it, which every browser honours.
-    try { await el.play(); } catch (e) {
-      $('audmsg').textContent = `Ready - tap Play to start. (${e.name})`;
-      reportError(`audio play refused after load: ${e.name}: ${e.message}`, `policy ${p.id}`);
-    }
+    // Always typed: iOS will not play a blob it cannot identify.
+    audioUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
   } catch (e) {
+    trace(`fetch failed ${e.message}`);
     $('audmsg').textContent = e.message;
-  } finally {
     $('audplay').disabled = false;
-    paintAudio();
+    return;
   }
+  // Play is called straight away, never after waiting for metadata: iOS does
+  // not read a file's length until play() has been called (beta 45 hung on it).
+  audioFor = p.id;
+  const pos = Number((prefs().audioPos ?? {})[p.id]) || 0;
+  if (pos > 5) {
+    // Pick up where this policy was left off, like an audiobook, backed up a breath.
+    el.addEventListener('loadedmetadata', () => { el.currentTime = pos - 3; }, { once: true });
+  }
+  el.src = audioUrl;
+  el.defaultPlaybackRate = el.playbackRate = audioSpeed();
+  audioSession(p);
+  $('audmsg').textContent = LISTEN_HINT;
+  // The button is released BEFORE waiting on play(). On iOS that promise can
+  // stay pending indefinitely, and a disabled button then left no way to retry.
+  $('audplay').disabled = false;
+  paintAudio();
+  audioWatchdog(p.id);
+  trace('play() called');
+  el.play().then(() => trace('play resolved'), (e) => {
+    trace(`play refused ${e.name}`);
+    $('audmsg').textContent = `Ready - tap Play to start. (${e.name})`;
+  });
 }
 
 function audioPlayPause() {
@@ -750,11 +790,17 @@ function audioPlayPause() {
   const el = $('policyaudio');
   if (audioFor !== p.id) { loadAudio(p); return; }
   if (el.paused) {
-    el.play().catch((e) => {
+    trace('play tapped again');
+    audioWatchdog(p.id);
+    el.play().then(() => trace('play resolved'), (e) => {
+      trace(`play refused on tap ${e.name}`);
       $('audmsg').textContent = `This device would not start the audio (${e.name}).`;
-      reportError(`audio play refused on tap: ${e.name}: ${e.message}`, `policy ${p.id}`);
+      reportError(`audio play refused on tap: ${e.name}: ${e.message}`, audioTrace.join('\n'));
     });
-  } else el.pause();
+  } else {
+    audioPausedByUser++;
+    el.pause();
+  }
 }
 
 function audioSkip(seconds) {
@@ -767,6 +813,7 @@ function audioSkip(seconds) {
 /** Stop is pause plus back to the start, and the saved place is forgotten. */
 function audioStop() {
   const el = $('policyaudio');
+  audioPausedByUser++;
   el.pause();
   if (el.duration > 0) el.currentTime = 0;
   if (audioFor) {
@@ -799,7 +846,7 @@ function audioSession(p) {
   });
   const on = (action, fn) => { try { ms.setActionHandler(action, fn); } catch { /* unsupported here */ } };
   on('play', () => el.play());
-  on('pause', () => el.pause());
+  on('pause', () => { audioPausedByUser++; el.pause(); });
   on('stop', () => audioStop());
   on('seekbackward', (d) => audioSkip(-(d.seekOffset || SKIP_BACK)));
   on('seekforward', (d) => audioSkip(d.seekOffset || SKIP_FWD));
@@ -1790,13 +1837,25 @@ $('audseek').addEventListener('change', () => {
 for (const ev of ['play', 'pause', 'ended', 'loadedmetadata', 'durationchange', 'seeked', 'ratechange']) {
   $('policyaudio').addEventListener(ev, () => { paintAudio(); audioPosition(); });
 }
+$('policyaudio').addEventListener('playing', () => {
+  audioPlayingFrom = $('policyaudio').currentTime;
+  if (audioFor) $('audmsg').textContent = LISTEN_HINT;   // clears any earlier stall notice
+});
+$('policyaudio').addEventListener('seeked', () => {
+  if (!$('policyaudio').paused) audioPlayingFrom = $('policyaudio').currentTime;
+});
+for (const ev of ['loadstart', 'loadedmetadata', 'canplay', 'playing', 'waiting', 'stalled', 'suspend', 'abort', 'emptied']) {
+  $('policyaudio').addEventListener(ev, () => { if (audioTrace.length < 60) trace(`event ${ev}`); });
+}
 // A file the device cannot decode says so on the card and in the error table,
 // so a silent player can be diagnosed without holding the device.
 $('policyaudio').addEventListener('error', () => {
   if (!audioFor) return;
   const code = $('policyaudio').error?.code;
   $('audmsg').textContent = `This device could not play the narration (error ${code}).`;
-  reportError(`audio element error ${code}: ${$('policyaudio').error?.message ?? ''}`, `policy ${audioFor}`);
+  trace(`element error ${code}`);
+  reportError(`audio element error ${code} on ${audioFor}: ${$('policyaudio').error?.message ?? ''}`,
+    audioTrace.join('\n'));
 });
 $('policyaudio').addEventListener('timeupdate', () => {
   if (!audioFor) return;   // the unlocking silence is nobody's position
@@ -1935,7 +1994,7 @@ window.addEventListener('online', () => sync(true));
    climbing with every deploy (the update machinery needs each build to have a
    fresh name), but the customer-facing word is beta. Going live, this becomes
    'v1' and the beta counter retires. */
-export const BUILD = 46;
+export const BUILD = 47;
 export const APP_VERSION = `beta ${BUILD}`;
 
 if ('serviceWorker' in navigator) {
