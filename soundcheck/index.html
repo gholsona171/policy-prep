@@ -44,6 +44,19 @@
   <div class="card"><b>E. The app's exact start: unlock, then swap</b>
     <button id="be">Play E</button><div class="verdict" id="ve"></div></div>
 
+  <div class="card"><b>F. A real policy recording saved on this device</b>
+    <button id="bf">Play F</button><div class="verdict" id="vf"></div></div>
+
+  <div class="card"><b>G. The tone at 1.25x speed</b>
+    <button id="bg">Play G</button><div class="verdict" id="vg"></div></div>
+
+  <div class="card"><b>H. The tone with lock-screen title and controls</b>
+    <button id="bh">Play H</button><div class="verdict" id="vh"></div></div>
+
+  <div class="card"><b>I. The tone on a player built into the page</b>
+    <button id="bi">Play I</button><div class="verdict" id="vi"></div></div>
+  <audio id="pagePlayer" preload="auto" playsinline></audio>
+
   <button class="ghost" id="stop">Stop all</button>
   <button class="ghost" id="back">Back to Policy Prep</button>
 </div>
@@ -66,7 +79,8 @@ const report = (message) => {
   if (!signedIn()) return;
   db('client_errors', { method: 'POST', prefer: 'return=minimal',
     body: { user_id: currentUserId(), build: BUILD, message: message.slice(0, 500),
-      stack: `standalone=${standalone} controlled=${!!navigator.serviceWorker?.controller}`,
+      stack: `standalone=${standalone} controlled=${!!navigator.serviceWorker?.controller}`
+        + ` savedSpeedIndex=${(() => { try { return JSON.parse(localStorage.getItem('policy-prep-prefs')).audioSpeed ?? 0; } catch { return '?'; } })()}`,
       ua: navigator.userAgent.slice(0, 300) } }).catch(() => {});
 };
 
@@ -153,6 +167,45 @@ document.getElementById('be').onclick = async () => {
   el.pause();
   el.src = url;
   start(el, 'E unlock+swap', document.getElementById('ve'));
+};
+
+// F-I each add one thing the app's narration player does that A-E do not.
+document.getElementById('bf').onclick = async () => {
+  const out = document.getElementById('vf');
+  const keys = (await (await caches.open(AUDIO_CACHE)).keys())
+    .map((r) => r.url).filter((u) => !u.includes('soundcheck-tone'));
+  if (!keys.length) {
+    out.innerHTML = '<span class="bad">no policy recording saved on this device yet - play one in the app first</span>';
+    return;
+  }
+  const url = keys[0];
+  out.textContent = url.split('/').pop();
+  start(new Audio(url), `F narration ${url.split('/').pop()}`, out);
+};
+document.getElementById('bg').onclick = () => {
+  const el = new Audio(TONE);
+  el.defaultPlaybackRate = el.playbackRate = 1.25;
+  start(el, 'G tone at 1.25x', document.getElementById('vg'));
+};
+document.getElementById('bh').onclick = () => {
+  const el = new Audio(TONE);
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: 'Sound check', artist: 'Policy Prep' });
+    try { navigator.mediaSession.setActionHandler('play', () => el.play()); } catch {}
+    try { navigator.mediaSession.setActionHandler('pause', () => el.pause()); } catch {}
+    el.addEventListener('playing', () => {
+      try {
+        navigator.mediaSession.playbackState = 'playing';
+        navigator.mediaSession.setPositionState({ duration: el.duration, playbackRate: el.playbackRate, position: el.currentTime });
+      } catch {}
+    });
+  }
+  start(el, 'H tone with media session', document.getElementById('vh'));
+};
+document.getElementById('bi').onclick = () => {
+  const el = document.getElementById('pagePlayer');
+  el.src = TONE;
+  start(el, 'I tone on page player', document.getElementById('vi'));
 };
 
 document.getElementById('stop').onclick = () => {
